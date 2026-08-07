@@ -1,0 +1,92 @@
+{
+  "seed": 2026,
+  "requested_val_ratio": 0.15,
+  "c_group_level": "specimen",
+  "objective_score": 0.1660596045933341,
+  "total": {
+    "images": 3200,
+    "empty_images": 1074,
+    "boxes": 5889,
+    "groups": 1853
+  },
+  "target_val": {
+    "images": 480.0,
+    "empty_images": 161.1,
+    "class_images": {
+      "jieba": 90.6,
+      "zonglie": 44.4,
+      "qilie": 4.2,
+      "jiaza": 16.95,
+      "yiwuyaru": 69.6,
+      "huashang": 9.0,
+      "mamianmakeng": 46.35,
+      "yanghuatiepi": 53.699999999999996,
+      "gunyin": 35.4
+    },
+    "class_boxes": {
+      "jieba": 178.5,
+      "zonglie": 70.95,
+      "qilie": 10.35,
+      "jiaza": 33.0,
+      "yiwuyaru": 90.45,
+      "huashang": 22.95,
+      "mamianmakeng": 365.4,
+      "yanghuatiepi": 73.8,
+      "gunyin": 37.949999999999996
+    }
+  },
+  "train": {
+    "images": 2726,
+    "empty_images": 910,
+    "groups": 1683,
+    "class_images": {
+      "zonglie": 251,
+      "jiaza": 96,
+      "mamianmakeng": 262,
+      "yanghuatiepi": 304,
+      "gunyin": 200,
+      "yiwuyaru": 395,
+      "jieba": 512,
+      "huashang": 51,
+      "qilie": 24
+    },
+    "class_boxes": {
+      "zonglie": 408,
+      "jiaza": 183,
+      "mamianmakeng": 2103,
+      "yanghuatiepi": 420,
+      "gunyin": 215,
+      "yiwuyaru": 511,
+      "jieba": 1013,
+      "huashang": 129,
+      "qilie": 62
+    }
+  },
+  "val": {
+    "images": 474,
+    "empty_images": 164,
+    "groups": 170,
+    "class_images": {
+      "jieba": 92,
+      "mamianmakeng": 47,
+      "zonglie": 45,
+      "jiaza": 17,
+      "yanghuatiepi": 54,
+      "yiwuyaru": 69,
+      "qilie": 4,
+      "gunyin": 36,
+      "huashang": 9
+    },
+    "class_boxes": {
+      "jieba": 177,
+      "mamianmakeng": 333,
+      "jiaza": 37,
+      "zonglie": 65,
+      "yanghuatiepi": 72,
+      "yiwuyaru": 92,
+      "qilie": 7,
+      "gunyin": 38,
+      "huashang": 24
+    }
+  }
+}

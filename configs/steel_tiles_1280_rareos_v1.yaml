@@ -1,0 +1,14 @@
+path: /root/autodl-tmp/steel_defect/datasets/tiles_1280_rareos_v1
+train: images/train
+val: images/val
+
+names:
+  0: jieba
+  1: zonglie
+  2: qilie
+  3: jiaza
+  4: yiwuyaru
+  5: huashang
+  6: mamianmakeng
+  7: yanghuatiepi
+  8: gunyin
