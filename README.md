@@ -1,14 +1,40 @@
-# Steel Surface Defect Detection
+# 钢板表面缺陷检测
 
-基于 YOLO 的钢板表面缺陷检测实验项目。
+基于 **YOLO26m** 的高分辨率钢板表面缺陷检测项目。
 
-本项目面向钢板/板材表面缺陷目标检测任务，目标是在高分辨率工业图像上完成 9 类表面缺陷检测，并围绕 **高分辨率切片、长尾类别、长条缺陷以及推理后处理** 进行系统实验。
+本项目面向约 `4096 × 3000` 的工业钢板图像，完成 9 类表面缺陷目标检测，并重点研究：
 
-当前主要模型为 **YOLO26m**，实验重点不是一次性堆叠大量技巧，而是通过可复现的单变量消融实验分析各策略对检测性能的影响。
+- 高分辨率滑窗切片
+- 长尾类别重采样
+- 长条缺陷检测
+- High-Recall 高召回推理
+- 跨切片 Global NMS
+- 本地 Recall 模拟评测
+- 可复现的单变量消融实验
+
+当前已完成：
+
+```text
+Baseline
+→ RareOS v1
+→ High-Recall Inference
+→ Local Recall Sweep
+→ Online Leaderboard Validation
+```
+
+当前最好线上成绩：
+
+```text
+Score  = 95.67
+Recall = 0.9567
+
+TP = 951
+FN = 43
+```
 
 ---
 
-## 1. Task
+## 1. 任务简介
 
 原始图像尺寸约为：
 
@@ -16,7 +42,7 @@
 4096 × 3000
 ```
 
-训练集：
+原始训练集：
 
 ```text
 3200 images
@@ -26,239 +52,395 @@
 
 共包含 9 类钢板表面缺陷：
 
-| ID | Class |
-|---:|---|
-| 0 | jieba |
-| 1 | zonglie |
-| 2 | qilie |
-| 3 | jiaza |
-| 4 | yiwuyaru |
-| 5 | huashang |
-| 6 | mamianmakeng |
-| 7 | yanghuatiepi |
-| 8 | gunyin |
+|   ID | 类别         |
+| ---: | ------------ |
+|    0 | jieba        |
+|    1 | zonglie      |
+|    2 | qilie        |
+|    3 | jiaza        |
+|    4 | yiwuyaru     |
+|    5 | huashang     |
+|    6 | mamianmakeng |
+|    7 | yanghuatiepi |
+|    8 | gunyin       |
 
-数据存在明显的类别不平衡问题，其中 `qilie` 和 `huashang` 属于当前重点关注的稀有类别。
+数据存在明显类别不平衡，其中 `qilie` 和 `huashang` 属于重点关注的稀有类别。
+
+此外，`zonglie`、`qilie`、`huashang` 具有明显的细长 / 长条目标特征，对切片边界和 overlap 较敏感。
 
 ---
 
-## 2. Project Pipeline
-
-当前数据与训练流程：
+## 2. 整体流程
 
 ```text
-VOC annotations
-      │
-      ▼
-Dataset audit
-      │
-      ▼
+VOC Annotations
+        │
+        ▼
+Dataset Audit
+        │
+        ▼
 VOC → YOLO
-      │
-      ▼
+        │
+        ▼
 Grouped Train / Val Split
-      │
-      ▼
+        │
+        ▼
 1280 × 1280 Tiling
-      │
-      ▼
+        │
+        ▼
 YOLO26m Baseline
-      │
-      ├── Rare-class Oversampling
-      │
-      ├── Long-defect Tiling
-      │
-      └── Inference / Global NMS
+        │
+        ├── RareOS v1
+        ├── High-Recall Inference
+        ├── Dense Tiling
+        ├── Global NMS Sweep
+        └── Local Recall Simulator
 ```
 
-### Grouped Split
+实验原则是：
 
-Train / Val 划分在切片之前完成，并按照原图/生产组进行 grouped split，避免来自同一原图或同一生产组的 tile 同时进入 Train 和 Val。
+> 先进行单变量短实验和本地验证，确认方向有效后，再投入完整训练或有限的线上提交次数。
 
-当前划分：
+---
+
+## 3. 数据划分
+
+Train / Val 在切片之前完成，并按照原图 / 生产组进行 grouped split，避免数据泄漏。
 
 ```text
 Train: 2726 images
 Val:    474 images
 
-Train/Val image overlap: 0
-Train/Val group overlap: 0
+Train / Val image overlap: 0
+Train / Val group overlap: 0
 ```
+
+验证集在 Baseline、RareOS、High-Recall 和 Dense Tiling 实验中保持固定。
 
 ---
 
-## 3. High-resolution Tiling
+## 4. 高分辨率切片
 
-由于原始图像约为 `4096 × 3000`，直接缩放到常规 YOLO 输入尺寸可能损失小缺陷和细长缺陷信息，因此当前正式训练采用滑窗切片。
+由于原始图像约为 `4096 × 3000`，直接缩放到常规 YOLO 输入尺寸可能损失小缺陷和细长缺陷信息，因此正式训练采用滑窗切片。
 
-主要参数：
-
-```text
-tile size : 1280
-stride    : 1024
-overlap   : 256
-overlap ratio ≈ 20%
-```
-
-普通目标：
+基础参数：
 
 ```text
-visible ratio threshold = 0.35
-```
-
-长条目标：
-
-```text
-zonglie
-qilie
-huashang
-```
-
-使用更宽松的保留策略：
-
-```text
-visible ratio threshold = 0.20
-long aspect ratio threshold = 8
+tile size = 1280
+stride    = 1024
+overlap   = 256
 ```
 
 正式切片数据规模：
 
 ```text
-Train tiles: 6476
-Val tiles:   1131
+Train tiles = 6476
+Val tiles   = 1131
 ```
 
-切片过程中同时处理：
-
-- 边界截断目标
-- 模糊/不确定 tile
-- 背景负样本
-- 大面积黑色区域
-- 长条目标可见比例
+针对 `zonglie`、`qilie`、`huashang` 等长条目标使用更宽松的边界保留策略，以降低切片截断造成的信息损失。
 
 ---
 
-## 4. Baseline
+## 5. Baseline
 
-当前正式基准模型：
-
-```text
-Model      : YOLO26m
-Image size : 1280
-Batch      : 6
-Epochs     : 80
-Seed       : 2026
-Best epoch : 73
-```
-
-Baseline validation result：
-
-| Metric | Value |
-|---|---:|
-| Precision | 0.571680 |
-| Recall | 0.492240 |
-| mAP50 | 0.517100 |
-| mAP50-95 | 0.296990 |
-
-80 epoch 后验证指标已经出现轻微下降，因此当前不计划通过简单增加 epoch 的方式继续提升性能。
-
-### Per-class observation
-
-当前表现较弱的类别主要是：
+正式 Baseline：
 
 ```text
-qilie
-huashang
+Model      = YOLO26m
+Image size = 1280
+Batch      = 6
+Epochs     = 80
+Seed       = 2026
+Best epoch = 73
 ```
 
-其中：
+Baseline 独立验证结果：
 
-- `qilie` 的核心问题是极端数据稀缺；
-- `huashang` 同时存在长尾和长条目标截断问题；
-- `zonglie` 样本数量相对充足，但长条目标的切片完整性值得进一步研究。
+| Metric    | Value |
+| --------- | ----: |
+| Precision | 0.570 |
+| Recall    | 0.494 |
+| mAP50     | 0.516 |
+| mAP50-95  | 0.297 |
+
+主要问题：
+
+```text
+qilie 数据极少
+huashang 长尾 + 长条
+zonglie 对切片边界敏感
+```
 
 ---
 
-## 5. Rare-class Oversampling
+## 6. RareOS v1
 
-当前第一个正式改进实验为：
-
-```text
-RareOS v1
-```
-
-只修改训练数据曝光频率：
+RareOS v1 只改变训练数据曝光频率：
 
 ```text
 qilie    ×4
 huashang ×2
 ```
 
-其他训练配置、验证集和随机种子均保持与 Baseline 一致。
+其他核心训练参数、随机种子和验证集保持不变。
 
 训练 tile 数：
 
 ```text
-Baseline : 6476
-RareOS v1: 6778
-
-Increase: +4.66%
+Baseline  = 6476
+RareOS v1 = 6778
 ```
 
-验证集保持：
+RareOS v1 `best.pt` 独立验证：
+
+| Model     | Precision |    Recall |     mAP50 |  mAP50-95 |
+| --------- | --------: | --------: | --------: | --------: |
+| Baseline  |     0.570 |     0.494 |     0.516 |     0.297 |
+| RareOS v1 |     0.559 | **0.541** | **0.528** | **0.304** |
+
+因此：
 
 ```text
-1131 → 1131
+Recall:
+0.494 → 0.541
+
+Δ Recall ≈ +0.047
 ```
 
-该实验用于回答：
+同时 mAP50 和 mAP50-95 也有小幅提升。
 
-> 稀有类别的定向重采样能否显著提高其 AP，同时不明显破坏强类以及整体 mAP？
+当前主模型：
+
+```text
+runs/rareos/yolo26m_tiles1280_rareos_v1_e80_b6_seed2026/weights/best.pt
+```
 
 ---
 
-## 6. Long-defect Study
+## 7. High-Recall 推理
 
-下一阶段重点研究长条缺陷，尤其是：
+线上评测结果显示，当前比赛分数与 Recall 高度一致：
+
+```text
+Score ≈ Recall × 100
+```
+
+因此，在保持预测框来自模型真实推理结果的前提下，对 confidence threshold、global NMS 和 tile overlap / stride 进行了系统实验。
+
+### 排行榜成绩演化
+
+| 方案             |     Score |     Recall |      TP |     FN |            FP |
+| ---------------- | --------: | ---------: | ------: | -----: | ------------: |
+| Baseline normal  |     82.50 |     0.8249 |     820 |    174 |         5,643 |
+| RareOS normal    |     82.50 |     0.8249 |     820 |    174 |         4,808 |
+| HighRecall v1    |     88.03 |     0.8803 |     875 |    119 |        18,829 |
+| HighRecall v2    |     89.54 |     0.8954 |     890 |    104 |        31,858 |
+| HighRecall v3    |     93.06 |     0.9306 |     925 |     69 |       176,156 |
+| **Current Best** | **95.67** | **0.9567** | **951** | **43** | **1,757,850** |
+
+从初始 Baseline 到当前最好结果：
+
+```text
+Score:
+82.50 → 95.67
+
+Δ = +13.17
+```
+
+漏检数量：
+
+```text
+FN:
+174 → 43
+```
+
+共额外找回 131 个真实目标。
+
+---
+
+## 8. 当前最佳推理配置
+
+```text
+Model:
+RareOS v1 best.pt
+
+tile_size   = 1280
+stride      = 768
+
+conf        = 1e-5
+
+tile_iou    = 0.60
+global_iou  = 0.90
+
+max_det     = 1000
+batch       = 6
+FP16        = True
+```
+
+测试集推理统计：
+
+```text
+Test images           = 669
+Total tiles           = 13,380
+
+Raw detections        = 2,247,802
+Final detections      = 1,758,801
+
+Images with detection = 669
+Images without        = 0
+```
+
+对应线上结果：
+
+```text
+Score      = 95.67
+Recall     = 0.9567
+Precision  = 0.0005
+F1         = 0.0011
+mAP@0.5    = 0.4554
+
+TP = 951
+FP = 1,757,850
+FN = 43
+```
+
+> 注意：这一配置针对当前比赛 Recall 导向的评分机制进行优化，并不代表适用于真实工业部署场景的最佳 Precision / Recall 工作点。
+
+---
+
+## 9. 本地 Recall 模拟器
+
+为了减少有限的排行榜提交次数，项目增加了：
+
+```text
+scripts/11_eval_highrecall_val.py
+```
+
+该脚本在固定验证集上模拟：
+
+```text
+Tiled Inference
+      ↓
+Map Boxes Back to Original Image
+      ↓
+Class-aware Global NMS
+      ↓
+IoU >= 0.5
+同类别一对一匹配
+      ↓
+TP / FP / FN / Recall
+```
+
+主要实验结果：
+
+| Config                                |      TP |     FN |       Recall | ScoreLike |
+| ------------------------------------- | ------: | -----: | -----------: | --------: |
+| V3                                    |     763 |     82 |     0.902959 |     90.30 |
+| gNMS=.90                              |     766 |     79 |     0.906509 |     90.65 |
+| tileNMS=.80                           |     763 |     82 |     0.902959 |     90.30 |
+| stride=896                            |     765 |     80 |     0.905325 |     90.53 |
+| stride=768                            |     775 |     70 |     0.917160 |     91.72 |
+| conf=1e-5                             |     783 |     62 |     0.926627 |     92.66 |
+| conf=1e-5 + stride=768                |     795 |     50 |     0.940828 |     94.08 |
+| **conf=1e-5 + stride=768 + gNMS=.90** | **797** | **48** | **0.943195** | **94.32** |
+
+本地排序与线上结果方向一致，因此后续参数筛选优先通过本地 Recall 模拟器完成。
+
+---
+
+## 10. 当前主要结论
+
+### 训练侧
+
+RareOS v1 有效：
+
+```text
+Validation Recall
+0.494 → 0.541
+```
+
+说明定向长尾重采样可以提高召回能力。
+
+### 推理侧
+
+目前收益最大的策略是：
+
+```text
+1. 降低 confidence threshold
+2. 增加 tile overlap
+3. 放宽 global NMS
+```
+
+其中：
+
+```text
+tile NMS 0.60 → 0.80
+```
+
+没有带来 Recall 改善，因此暂时不作为重点方向。
+
+### 当前主要困难类别
+
+本地最强配置下仍需重点关注：
 
 ```text
 zonglie
+qilie
+huashang
 ```
 
-主要关注：
+尤其需要研究：
 
-- tile overlap
-- 边界截断
-- long-object preservation
-- visible-ratio threshold
-- 跨 tile 重复预测
-- global NMS
-
-目标是区分：
-
-```text
-数据不足
-≠
-切片损失
-≠
-模型训练问题
-≠
-推理后处理问题
-```
-
-并通过单变量实验确定性能瓶颈。
+- 长条目标被 tile 截断
+- 极低样本类别
+- 方向敏感目标
+- 剩余 FN 的空间分布
+- 不同模型之间的互补预测
 
 ---
 
-## 7. Repository Structure
+## 11. 下一阶段计划
+
+当前线上仍有：
+
+```text
+FN = 43
+```
+
+下一阶段不再优先采用“无限降低 conf”的方式。
+
+计划研究：
+
+```text
+Remaining FN Analysis
+        │
+        ├── zonglie / qilie / huashang
+        ├── TTA
+        │   └── Horizontal Flip
+        ├── Long-defect Tiling
+        ├── Model Ensemble
+        └── Additional Recall-oriented Inference
+```
+
+阶段目标：
+
+```text
+95.67
+→ 97+
+→ 进一步降低 FN
+```
+
+---
+
+## 12. 项目结构
 
 ```text
 .
 ├── configs/
 │   ├── steel_original.yaml
 │   ├── steel_tiles_1280.yaml
-│   ├── steel_tiles_1280_rareos_v1.yaml
-│   └── steel_tiles_trial_1280.yaml
+│   └── steel_tiles_1280_rareos_v1.yaml
 │
 ├── scripts/
 │   ├── 00_visualize_voc.py
@@ -271,166 +453,82 @@ zonglie
 │   ├── 07_analyze_baseline.py
 │   ├── 08_make_rare_oversample_dataset.py
 │   ├── 09_run_baseline2_gpu.sh
-│   └── 10_predict_test_submission.py
+│   ├── 10_predict_test_submission.py
+│   ├── 11_eval_highrecall_val.py
+│   ├── 12_run_highrecall_sweep.sh
+│   └── 13_record_experiment_results.sh
+│
+├── docs/
+│   └── experiment_log_20260808.md
 │
 ├── splits/
 ├── .gitignore
 └── README.md
 ```
 
-### Scripts
-
-| Script | Purpose |
-|---|---|
-| `00_visualize_voc.py` | VOC 标注与样本可视化 |
-| `01_make_bbox_crops.py` | 生成 bbox 缺陷裁剪样本 |
-| `02_audit_dataset.py` | 原始数据集统计与标注审计 |
-| `03_voc_to_yolo.py` | VOC → YOLO 标注转换 |
-| `04_make_grouped_split.py` | Grouped Train / Val 划分 |
-| `05_make_tile_trial.py` | 切片策略小规模试验 |
-| `06_make_full_tiles.py` | 构建正式 1280 tile 数据集 |
-| `07_analyze_baseline.py` | Baseline 与类别级问题诊断 |
-| `08_make_rare_oversample_dataset.py` | 稀有类别重采样数据集 |
-| `09_run_baseline2_gpu.sh` | RareOS GPU 训练脚本 |
-| `10_predict_test_submission.py` | Test tiled inference 与提交文件生成 |
-
 ---
 
-## 8. Environment
+## 13. 关键脚本
 
-当前主要实验环境：
+| Script                               | 功能                      |
+| ------------------------------------ | ------------------------- |
+| `00_visualize_voc.py`                | VOC 标注可视化            |
+| `01_make_bbox_crops.py`              | 生成缺陷 bbox 裁剪        |
+| `02_audit_dataset.py`                | 数据集审计                |
+| `03_voc_to_yolo.py`                  | VOC → YOLO                |
+| `04_make_grouped_split.py`           | 防泄漏 Train / Val 分组   |
+| `05_make_tile_trial.py`              | 小规模切片实验            |
+| `06_make_full_tiles.py`              | 构建正式 tile 数据集      |
+| `07_analyze_baseline.py`             | Baseline 分析             |
+| `08_make_rare_oversample_dataset.py` | RareOS 数据构建           |
+| `09_run_baseline2_gpu.sh`            | RareOS 训练               |
+| `10_predict_test_submission.py`      | 官方 test tiled inference |
+| `11_eval_highrecall_val.py`          | 本地 Recall 模拟评测      |
+| `12_run_highrecall_sweep.sh`         | High-Recall 参数扫描      |
+| `13_record_experiment_results.sh`    | 自动生成阶段实验记录      |
+
+详细实验记录：
 
 ```text
-GPU    : NVIDIA RTX 5090 32GB
-OS     : Ubuntu 22.04
-Python : 3.12
-PyTorch: 2.8.0
-CUDA   : 12.8
-```
-
-主要检测框架：
-
-```text
-Ultralytics YOLO
-YOLO26m
+docs/experiment_log_20260808.md
 ```
 
 ---
 
-## 9. Inference
+## 14. 实验原则
 
-正式测试集推理沿用训练阶段的切片逻辑：
+本项目尽量遵循：
 
-```text
-tile size      = 1280
-stride         = 1024
-overlap        = 256
+1. **单变量消融**
+2. **固定随机种子**
+3. **固定 Train / Val**
+4. **避免切片级数据泄漏**
+5. **短实验筛选后再完整训练**
+6. **线上提交前优先本地验证**
+7. **区分训练收益和推理收益**
+8. **保存完整实验配置和日志**
 
-tile conf      = 0.01
-tile NMS IoU   = 0.60
-global NMS IoU = 0.50
-```
-
-整体流程：
-
-```text
-Original test image
-        │
-        ▼
-1280 × 1280 tiled inference
-        │
-        ▼
-Map boxes back to original image
-        │
-        ▼
-Class-aware global NMS
-        │
-        ▼
-Submission
-```
-
-当前 Baseline 推理阶段暂不引入：
+同时明确区分：
 
 ```text
-TTA
-Ensemble
-Complex threshold tuning
+dataset problem
+tiling problem
+training problem
+inference problem
+post-processing problem
 ```
-
-以获得干净、可对比的 baseline leaderboard result。
 
 ---
 
-## 10. Experimental Principle
+## 15. 数据与权重
 
-本项目实验遵循以下原则：
-
-1. **Single-variable ablation**
-
-   每轮实验尽量只修改一个核心变量。
-
-2. **Reproducibility**
-
-   固定数据划分、验证集和随机种子。
-
-3. **Strict baseline comparison**
-
-   所有改进都与正式 Baseline 进行严格对照。
-
-4. **Separate different error sources**
-
-   明确区分：
-
-   ```text
-   dataset
-   tiling
-   training
-   inference / post-processing
-   ```
-
-5. **Short screening before full training**
-
-   新策略优先进行短训练筛选，有明确收益后再进行完整训练。
-
----
-
-## 11. Current Experiment Roadmap
-
-```text
-Baseline
-YOLO26m + 1280 tiles
-        │
-        ├── RareOS v1
-        │   ├── qilie ×4
-        │   └── huashang ×2
-        │
-        ├── Long-defect tiling
-        │   └── focus: zonglie
-        │
-        ├── Inference optimization
-        │
-        └── Final combination
-```
-
-当前工作重点：
-
-- Baseline leaderboard evaluation
-- RareOS ablation
-- Long-defect tiling study
-- Final combination experiments
-
----
-
-## 12. Data and Weights
-
-由于数据集、训练结果和模型权重体积较大，本仓库不包含：
+由于数据和模型文件体积较大，本仓库不保存：
 
 ```text
 raw/
 datasets/
 runs/
 logs/
-metadata/
 submissions/
 
 *.pt
@@ -439,33 +537,48 @@ submissions/
 *.engine
 ```
 
-仓库主要保存：
+尤其不提交大型预测 JSON 和模型权重。
+
+仓库主要用于保存：
 
 - 数据处理代码
-- 数据划分信息
+- 数据划分
 - 实验配置
 - 训练脚本
-- 推理脚本
-- 可复现实验流程
+- 推理代码
+- Recall 评测工具
+- 实验记录
+- 可复现研究流程
 
 ---
 
-## Status
-
-This repository is under active development.
-
-Current baseline:
+## 16. 当前状态
 
 ```text
-YOLO26m
-mAP50    = 0.51710
-mAP50-95 = 0.29699
+Model:
+YOLO26m + RareOS v1
+
+Validation:
+Recall     = 0.541
+mAP50      = 0.528
+mAP50-95   = 0.304
+
+Best Leaderboard:
+Score      = 95.67
+Recall     = 0.9567
+
+TP         = 951
+FN         = 43
 ```
 
-Current experiment:
+项目仍在持续开发中。
+
+下一阶段重点：
 
 ```text
-RareOS v1
-qilie ×4
-huashang ×2
+Remaining FN Analysis
+TTA
+Long-defect Optimization
+Model Ensemble
+97+ Leaderboard Exploration
 ```
