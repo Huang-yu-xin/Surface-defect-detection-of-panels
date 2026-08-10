@@ -10,26 +10,45 @@
 - High-Recall 高召回推理
 - 跨切片 Global NMS
 - 本地 Recall 模拟评测
+- Remaining FN 根因分析
+- Horizontal Flip TTA
+- 跨切片长缺陷拼接
 - 可复现的单变量消融实验
 
-当前已完成：
+截至 **2026-08-10**，项目已完成：
 
 ```text
 Baseline
 → RareOS v1
 → High-Recall Inference
 → Local Recall Sweep
+→ Remaining FN Diagnostic
+→ Horizontal Flip TTA
+→ Zonglie Cross-Tile Stitching
+→ Final Selective-TTA Combo
 → Online Leaderboard Validation
 ```
 
 当前最好线上成绩：
 
 ```text
-Score  = 95.67
-Recall = 0.9567
+Score  = 98.09
+Recall = 0.9809
 
-TP = 951
-FN = 43
+TP = 975
+FN = 19
+```
+
+相较此前 `95.67` 版本：
+
+```text
+Score: 95.67 → 98.09
+TP:       951 → 975
+FN:        43 → 19
+
+Δ Score = +2.42
+Δ TP    = +24
+Δ FN    = -24
 ```
 
 ---
@@ -66,7 +85,7 @@ FN = 43
 
 数据存在明显类别不平衡，其中 `qilie` 和 `huashang` 属于重点关注的稀有类别。
 
-此外，`zonglie`、`qilie`、`huashang` 具有明显的细长 / 长条目标特征，对切片边界和 overlap 较敏感。
+此外，`zonglie`、`qilie`、`huashang` 具有明显的细长 / 长条目标特征，对切片边界、overlap 和后处理方式较敏感。
 
 ---
 
@@ -91,10 +110,26 @@ Grouped Train / Val Split
 YOLO26m Baseline
         │
         ├── RareOS v1
+        │
         ├── High-Recall Inference
+        │
         ├── Dense Tiling
+        │
         ├── Global NMS Sweep
-        └── Local Recall Simulator
+        │
+        ├── Local Recall Simulator
+        │
+        ├── Remaining FN Diagnostic
+        │
+        ├── Horizontal Flip TTA
+        │
+        └── Zonglie Cross-Tile Stitching
+                         │
+                         ▼
+                  Final Combo
+                         │
+                         ▼
+                  Online Score 98.09
 ```
 
 实验原则是：
@@ -115,7 +150,7 @@ Train / Val image overlap: 0
 Train / Val group overlap: 0
 ```
 
-验证集在 Baseline、RareOS、High-Recall 和 Dense Tiling 实验中保持固定。
+验证集在 Baseline、RareOS、High-Recall、FN Diagnostic、TTA 和 Cross-Tile Stitching 实验中保持固定。
 
 ---
 
@@ -123,7 +158,7 @@ Train / Val group overlap: 0
 
 由于原始图像约为 `4096 × 3000`，直接缩放到常规 YOLO 输入尺寸可能损失小缺陷和细长缺陷信息，因此正式训练采用滑窗切片。
 
-基础参数：
+基础训练切片参数：
 
 ```text
 tile size = 1280
@@ -139,6 +174,15 @@ Val tiles   = 1131
 ```
 
 针对 `zonglie`、`qilie`、`huashang` 等长条目标使用更宽松的边界保留策略，以降低切片截断造成的信息损失。
+
+High-Recall 推理阶段进一步将 stride 收缩至：
+
+```text
+stride = 768
+overlap = 512
+```
+
+以提高原图覆盖密度。
 
 ---
 
@@ -230,36 +274,39 @@ Score ≈ Recall × 100
 
 ### 排行榜成绩演化
 
-| 方案             |     Score |     Recall |      TP |     FN |            FP |
-| ---------------- | --------: | ---------: | ------: | -----: | ------------: |
-| Baseline normal  |     82.50 |     0.8249 |     820 |    174 |         5,643 |
-| RareOS normal    |     82.50 |     0.8249 |     820 |    174 |         4,808 |
-| HighRecall v1    |     88.03 |     0.8803 |     875 |    119 |        18,829 |
-| HighRecall v2    |     89.54 |     0.8954 |     890 |    104 |        31,858 |
-| HighRecall v3    |     93.06 |     0.9306 |     925 |     69 |       176,156 |
-| **Current Best** | **95.67** | **0.9567** | **951** | **43** | **1,757,850** |
+| 方案                              |     Score |     Recall |      TP |     FN |            FP |
+| --------------------------------- | --------: | ---------: | ------: | -----: | ------------: |
+| Baseline normal                   |     82.50 |     0.8249 |     820 |    174 |         5,643 |
+| RareOS normal                     |     82.50 |     0.8249 |     820 |    174 |         4,808 |
+| HighRecall v1                     |     88.03 |     0.8803 |     875 |    119 |        18,829 |
+| HighRecall v2                     |     89.54 |     0.8954 |     890 |    104 |        31,858 |
+| HighRecall v3                     |     93.06 |     0.9306 |     925 |     69 |       176,156 |
+| HighRecall + Dense Tiling         |     95.67 |     0.9567 |     951 |     43 |     1,757,850 |
+| **Selective HFlip + Zonglie Stitch** | **98.09** | **0.9809** | **975** | **19** | **2,402,834** |
 
 从初始 Baseline 到当前最好结果：
 
 ```text
 Score:
-82.50 → 95.67
+82.50 → 98.09
 
-Δ = +13.17
+Δ = +15.59
 ```
 
 漏检数量：
 
 ```text
 FN:
-174 → 43
+174 → 19
 ```
 
-共额外找回 131 个真实目标。
+共额外找回 155 个真实目标。
 
 ---
 
-## 8. 当前最佳推理配置
+## 8. High-Recall 基础配置
+
+最终方案仍以以下 High-Recall 参数作为基础：
 
 ```text
 Model:
@@ -278,20 +325,7 @@ batch       = 6
 FP16        = True
 ```
 
-测试集推理统计：
-
-```text
-Test images           = 669
-Total tiles           = 13,380
-
-Raw detections        = 2,247,802
-Final detections      = 1,758,801
-
-Images with detection = 669
-Images without        = 0
-```
-
-对应线上结果：
+此前仅使用这一基础配置的线上结果：
 
 ```text
 Score      = 95.67
@@ -332,7 +366,7 @@ IoU >= 0.5
 TP / FP / FN / Recall
 ```
 
-主要实验结果：
+High-Recall 参数实验结果：
 
 | Config                                |      TP |     FN |       Recall | ScoreLike |
 | ------------------------------------- | ------: | -----: | -----------: | --------: |
@@ -345,11 +379,417 @@ TP / FP / FN / Recall
 | conf=1e-5 + stride=768                |     795 |     50 |     0.940828 |     94.08 |
 | **conf=1e-5 + stride=768 + gNMS=.90** | **797** | **48** | **0.943195** | **94.32** |
 
-本地排序与线上结果方向一致，因此后续参数筛选优先通过本地 Recall 模拟器完成。
+本地排序与线上结果方向一致，因此后续参数筛选继续优先通过固定 Val 的 Recall 模拟完成。
 
 ---
 
-## 10. 当前主要结论
+## 10. Remaining FN Diagnostic
+
+在 High-Recall 基础配置达到：
+
+```text
+TP = 797
+FN = 48
+Recall = 0.943195
+```
+
+之后，不再继续盲目降低 confidence，而是通过：
+
+```text
+scripts/14_fn_diagnostic.py
+```
+
+缓存每张 Val 图像在 Global NMS 前的候选框，并对剩余 FN 做根因分析。
+
+### 48 个 FN 的失败类型
+
+| Failure Type                          | Count |
+| ------------------------------------- | ----: |
+| localization_or_tile_fragmentation    |    22 |
+| localization_failure                  |    14 |
+| class_confusion                       |    12 |
+
+即：
+
+```text
+Localization / Tile Fragmentation = 36 / 48 = 75%
+Class Confusion                   = 12 / 48 = 25%
+```
+
+没有观察到主要由以下因素导致的 FN：
+
+```text
+global_nms_suppression
+matching_competition
+no_same_class_candidate
+```
+
+因此，继续降低 conf 或单纯调整 Global NMS 已不再是主要突破方向。
+
+### FN 类别分布
+
+| Class         | TP  | FN | Recall |
+| ------------- | --: | -: | -----: |
+| jieba         | 170 |  7 | 0.9605 |
+| zonglie       |  49 | 16 | 0.7538 |
+| qilie         |   4 |  3 | 0.5714 |
+| jiaza         |  32 |  5 | 0.8649 |
+| yiwuyaru      |  89 |  3 | 0.9674 |
+| huashang      |  19 |  5 | 0.7917 |
+| mamianmakeng  | 332 |  1 | 0.9970 |
+| yanghuatiepi  |  65 |  7 | 0.9028 |
+| gunyin        |  37 |  1 | 0.9737 |
+
+其中 `zonglie` 成为最大的单一 FN 来源。
+
+---
+
+## 11. Horizontal Flip TTA
+
+使用：
+
+```text
+scripts/15_cache_hflip_tta.py
+scripts/16_eval_hflip_tta_cache.py
+```
+
+对固定 Val 集进行 Horizontal Flip TTA：
+
+```text
+Original
++
+Horizontal Flip
++
+Map HFlip Boxes Back to Original Coordinates
++
+Unified Class-aware Global NMS
+```
+
+完整 HFlip union 结果：
+
+```text
+Original:
+TP       = 797
+FN       = 48
+Recall   = 0.943195
+ScoreLike= 94.32
+
+Original + HFlip:
+TP       = 809
+FN       = 36
+Recall   = 0.957396
+ScoreLike= 95.74
+```
+
+即：
+
+```text
+Rescued FN = 12
+Regressed TP = 0
+```
+
+HFlip 救回类别：
+
+| Class         | Rescued FN |
+| ------------- | ---------: |
+| jieba         |          3 |
+| qilie         |          2 |
+| jiaza         |          1 |
+| yiwuyaru      |          2 |
+| yanghuatiepi  |          4 |
+
+而：
+
+```text
+zonglie       = 0
+huashang      = 0
+mamianmakeng  = 0
+gunyin        = 0
+```
+
+因此最终方案不再加入所有 HFlip proposals，而只对以下类别保留 HFlip：
+
+```text
+jieba
+qilie
+jiaza
+yiwuyaru
+yanghuatiepi
+```
+
+这样保留有效增益，同时减少无贡献的额外候选。
+
+---
+
+## 12. Zonglie 跨切片拼接
+
+FN Diagnostic 发现：
+
+```text
+zonglie FN = 16
+```
+
+并且这 16 个 FN 全部属于：
+
+```text
+localization_or_tile_fragmentation
+```
+
+其典型 GT 几何形态：
+
+```text
+width  ≈ 53 ~ 129 px
+height ≈ 1937 ~ 2999 px
+elongation ≈ 23 ~ 53
+```
+
+绝大多数 `zonglie` 高度远大于单个：
+
+```text
+tile_size = 1280
+```
+
+因此单个 tile 产生的局部框即使定位正确，也很难与约 3000 px 高的完整 GT 达到：
+
+```text
+IoU >= 0.5
+```
+
+这说明问题的根源不是“模型完全没有检测到纵裂”，而是：
+
+```text
+同一纵裂
+→ 在多个相邻 tile 中形成多个局部预测
+→ Global NMS 不会把这些纵向片段合成长框
+→ 与完整 GT 的 IoU 不足
+```
+
+### Cross-Tile Stitching
+
+使用：
+
+```text
+scripts/17_eval_zonglie_cross_tile_stitch_gpu.py
+```
+
+将相邻 tile row 中：
+
+- 类别均为 `zonglie`
+- 横向位置接近
+- x 区域具有重叠
+- y 方向连续 / 邻近
+- 具有明显纵向长条形态
+
+的真实模型候选框进行跨切片拼接。
+
+最终选用：
+
+```text
+min_aspect = 5
+x_tol      = 64
+max_y_gap  = 64
+```
+
+验证结果：
+
+```text
+Baseline zonglie:
+TP = 49
+FN = 16
+
+After Cross-Tile Stitch:
+TP = 64
+FN = 1
+
+Rescued   = 15
+Regressed = 0
+```
+
+即：
+
+```text
+15 / 16 zonglie FN 被直接救回
+```
+
+### 参数稳定性
+
+共测试 12 组组合：
+
+```text
+min_aspect ∈ {3, 5}
+x_tol      ∈ {32, 64, 96}
+max_y_gap  ∈ {64, 256}
+```
+
+所有 12 组均得到：
+
+```text
+TP = 64
+FN = 1
+Rescued = 15
+Regressed = 0
+```
+
+说明该收益并非单一参数点过拟合，而是一个较宽的稳定平台。
+
+---
+
+## 13. Final Combo
+
+最终验证脚本：
+
+```text
+scripts/18_final_combo_from_cache.py
+```
+
+最终组合：
+
+```text
+RareOS v1
++
+High-Recall Base Inference
++
+Selective Horizontal Flip TTA
++
+Zonglie Cross-Tile Stitching
+```
+
+其中：
+
+### Base
+
+```text
+tile_size   = 1280
+stride      = 768
+conf        = 1e-5
+tile_iou    = 0.60
+global_iou  = 0.90
+max_det     = 1000
+FP16        = True
+```
+
+### Selective HFlip
+
+只加入：
+
+```text
+jieba
+qilie
+jiaza
+yiwuyaru
+yanghuatiepi
+```
+
+### Zonglie Stitch
+
+```text
+min_aspect       = 5
+x_tol            = 64
+max_y_gap        = 64
+min_merged_height= 1300
+```
+
+### Final Combo Val
+
+```text
+TP        = 824
+FP        = 1,631,208
+FN        = 21
+Recall    = 0.975148
+ScoreLike = 97.51
+```
+
+相较 High-Recall Base：
+
+```text
+TP: 797 → 824
+FN:  48 → 21
+
+Δ TP = +27
+Δ FN = -27
+```
+
+其中：
+
+```text
+HFlip rescue           = +12 TP
+Zonglie stitching      = +15 TP
+```
+
+两类增益基本互补。
+
+---
+
+## 14. 当前最好线上成绩：98.09
+
+2026-08-10，Final Combo 正式提交结果：
+
+```text
+Score      = 98.09
+Recall     = 0.9809
+Precision  = 0.0004
+F1         = 0.0008
+mAP@0.5    = 0.4550
+
+TP = 975
+FP = 2,402,834
+FN = 19
+```
+
+相较此前 High-Recall 最佳版本：
+
+```text
+Previous:
+Score = 95.67
+TP    = 951
+FN    = 43
+
+Current:
+Score = 98.09
+TP    = 975
+FN    = 19
+```
+
+提升：
+
+```text
+Δ Score = +2.42
+Δ TP    = +24
+Δ FN    = -24
+```
+
+从最初 Baseline 到当前版本：
+
+```text
+Score:
+82.50 → 98.09
+
+TP:
+820 → 975
+
+FN:
+174 → 19
+```
+
+该结果验证了：
+
+```text
+RareOS
++
+High-Recall Inference
++
+FN Root-Cause Analysis
++
+Selective TTA
++
+Class-Specific Cross-Tile Post-processing
+```
+
+这一整套实验路线的有效性。
+
+---
+
+## 15. 当前主要结论
 
 ### 训练侧
 
@@ -362,9 +802,9 @@ Validation Recall
 
 说明定向长尾重采样可以提高召回能力。
 
-### 推理侧
+### High-Recall 推理侧
 
-目前收益最大的策略是：
+此前最有效的基础策略：
 
 ```text
 1. 降低 confidence threshold
@@ -372,68 +812,116 @@ Validation Recall
 3. 放宽 global NMS
 ```
 
-其中：
+但在：
 
 ```text
-tile NMS 0.60 → 0.80
+conf = 1e-5
+stride = 768
+global_iou = 0.90
 ```
 
-没有带来 Recall 改善，因此暂时不作为重点方向。
+之后，继续降低 conf 已出现明显边际收益递减。
 
-### 当前主要困难类别
+### FN 根因分析比盲目 sweep 更有效
 
-本地最强配置下仍需重点关注：
+剩余 48 FN 中：
 
 ```text
-zonglie
+75% 与 localization / tile fragmentation 有关
+```
+
+因此后续突破来自结构化问题分析，而不是继续无方向扩大参数搜索。
+
+### TTA 具有类别选择性
+
+Horizontal Flip 并非对全部类别都有帮助。
+
+有效类别：
+
+```text
+jieba
 qilie
-huashang
+jiaza
+yiwuyaru
+yanghuatiepi
 ```
 
-尤其需要研究：
+对 `zonglie` 没有救回，因此最终采用 selective TTA。
 
-- 长条目标被 tile 截断
-- 极低样本类别
-- 方向敏感目标
-- 剩余 FN 的空间分布
-- 不同模型之间的互补预测
+### 长缺陷需要专门的跨切片后处理
+
+`zonglie` 的主要问题不是低置信度，而是：
+
+```text
+GT 长度 > tile_size
+```
+
+Cross-Tile Stitching 将：
+
+```text
+zonglie FN:
+16 → 1
+```
+
+说明对于超长目标，单纯提高 overlap 并不能完全替代结构化跨切片拼接。
 
 ---
 
-## 11. 下一阶段计划
+## 16. 下一阶段计划
 
-当前线上仍有：
+当前线上：
 
 ```text
-FN = 43
+Score = 98.09
+FN    = 19
 ```
 
-下一阶段不再优先采用“无限降低 conf”的方式。
+已经从“继续扩大整体召回”进入“针对最后少量 FN 做精细优化”的阶段。
 
-计划研究：
+固定 Val Final Combo 下剩余 21 个 FN 主要集中于：
 
 ```text
-Remaining FN Analysis
-        │
-        ├── zonglie / qilie / huashang
-        ├── TTA
-        │   └── Horizontal Flip
-        ├── Long-defect Tiling
-        ├── Model Ensemble
-        └── Additional Recall-oriented Inference
+huashang       5
+jieba          4
+jiaza          4
+yanghuatiepi   3
+zonglie        1
+qilie          1
+yiwuyaru       1
+mamianmakeng   1
+gunyin         1
+```
+
+下一阶段优先研究：
+
+```text
+Remaining 21 FN
+      │
+      ├── Small-object Localization
+      │     └── huashang
+      │
+      ├── Box Fusion / Box Refinement
+      │
+      ├── Class-specific Proposal Union
+      │
+      ├── Selective Additional TTA
+      │
+      └── Model Ensemble
 ```
 
 阶段目标：
 
 ```text
-95.67
-→ 97+
-→ 进一步降低 FN
+98.09
+→ 98.5+
+→ 尝试进一步逼近 99
 ```
+
+线上提交次数有限，因此新方案仍应优先在固定 Val 和缓存候选上验证。
 
 ---
 
-## 12. 项目结构
+## 17. 项目结构
 
 ```text
 .
@@ -456,7 +944,12 @@ Remaining FN Analysis
 │   ├── 10_predict_test_submission.py
 │   ├── 11_eval_highrecall_val.py
 │   ├── 12_run_highrecall_sweep.sh
-│   └── 13_record_experiment_results.sh
+│   ├── 13_record_experiment_results.sh
+│   ├── 14_fn_diagnostic.py
+│   ├── 15_cache_hflip_tta.py
+│   ├── 16_eval_hflip_tta_cache.py
+│   ├── 17_eval_zonglie_cross_tile_stitch_gpu.py
+│   └── 18_final_combo_from_cache.py
 │
 ├── docs/
 │   └── experiment_log_20260808.md
@@ -468,26 +961,31 @@ Remaining FN Analysis
 
 ---
 
-## 13. 关键脚本
+## 18. 关键脚本
 
-| Script                               | 功能                      |
-| ------------------------------------ | ------------------------- |
-| `00_visualize_voc.py`                | VOC 标注可视化            |
-| `01_make_bbox_crops.py`              | 生成缺陷 bbox 裁剪        |
-| `02_audit_dataset.py`                | 数据集审计                |
-| `03_voc_to_yolo.py`                  | VOC → YOLO                |
-| `04_make_grouped_split.py`           | 防泄漏 Train / Val 分组   |
-| `05_make_tile_trial.py`              | 小规模切片实验            |
-| `06_make_full_tiles.py`              | 构建正式 tile 数据集      |
-| `07_analyze_baseline.py`             | Baseline 分析             |
-| `08_make_rare_oversample_dataset.py` | RareOS 数据构建           |
-| `09_run_baseline2_gpu.sh`            | RareOS 训练               |
-| `10_predict_test_submission.py`      | 官方 test tiled inference |
-| `11_eval_highrecall_val.py`          | 本地 Recall 模拟评测      |
-| `12_run_highrecall_sweep.sh`         | High-Recall 参数扫描      |
-| `13_record_experiment_results.sh`    | 自动生成阶段实验记录      |
+| Script                                          | 功能                                      |
+| ----------------------------------------------- | ----------------------------------------- |
+| `00_visualize_voc.py`                           | VOC 标注可视化                            |
+| `01_make_bbox_crops.py`                         | 生成缺陷 bbox 裁剪                        |
+| `02_audit_dataset.py`                           | 数据集审计                                |
+| `03_voc_to_yolo.py`                             | VOC → YOLO                                |
+| `04_make_grouped_split.py`                      | 防泄漏 Train / Val 分组                   |
+| `05_make_tile_trial.py`                         | 小规模切片实验                            |
+| `06_make_full_tiles.py`                         | 构建正式 tile 数据集                      |
+| `07_analyze_baseline.py`                        | Baseline 分析                             |
+| `08_make_rare_oversample_dataset.py`            | RareOS 数据构建                           |
+| `09_run_baseline2_gpu.sh`                       | RareOS 训练                               |
+| `10_predict_test_submission.py`                 | 官方 test tiled inference                 |
+| `11_eval_highrecall_val.py`                     | 本地 Recall 模拟评测                      |
+| `12_run_highrecall_sweep.sh`                    | High-Recall 参数扫描                      |
+| `13_record_experiment_results.sh`               | 自动生成阶段实验记录                      |
+| `14_fn_diagnostic.py`                           | Remaining FN 根因诊断与候选缓存           |
+| `15_cache_hflip_tta.py`                         | Horizontal Flip TTA 候选缓存              |
+| `16_eval_hflip_tta_cache.py`                    | Original + HFlip 离线 Val 评估            |
+| `17_eval_zonglie_cross_tile_stitch_gpu.py`      | Zonglie 跨切片拼接参数验证                |
+| `18_final_combo_from_cache.py`                  | Final Combo Val / Test 缓存后处理与提交生成 |
 
-详细实验记录：
+已有详细实验记录：
 
 ```text
 docs/experiment_log_20260808.md
@@ -495,7 +993,7 @@ docs/experiment_log_20260808.md
 
 ---
 
-## 14. 实验原则
+## 19. 实验原则
 
 本项目尽量遵循：
 
@@ -507,6 +1005,9 @@ docs/experiment_log_20260808.md
 6. **线上提交前优先本地验证**
 7. **区分训练收益和推理收益**
 8. **保存完整实验配置和日志**
+9. **先分析 FN 根因，再选择下一项实验**
+10. **优先复用 inference cache，减少重复 GPU 推理**
+11. **针对不同类别采用不同后处理策略**
 
 同时明确区分：
 
@@ -520,16 +1021,18 @@ post-processing problem
 
 ---
 
-## 15. 数据与权重
+## 20. 数据、缓存与权重
 
-由于数据和模型文件体积较大，本仓库不保存：
+由于数据、缓存和模型文件体积较大，本仓库不保存：
 
 ```text
 raw/
 datasets/
 runs/
 logs/
+results/
 submissions/
+records/
 
 *.pt
 *.pth
@@ -537,7 +1040,13 @@ submissions/
 *.engine
 ```
 
-尤其不提交大型预测 JSON 和模型权重。
+尤其不提交：
+
+- 原始训练 / 测试数据
+- 模型权重
+- 百万级候选缓存
+- 大型预测 JSON
+- submission.zip
 
 仓库主要用于保存：
 
@@ -547,28 +1056,60 @@ submissions/
 - 训练脚本
 - 推理代码
 - Recall 评测工具
+- FN Diagnostic 工具
+- TTA / Cross-Tile 后处理代码
 - 实验记录
 - 可复现研究流程
 
 ---
 
-## 16. 当前状态
+## 21. 当前状态
 
 ```text
 Model:
 YOLO26m + RareOS v1
 
-Validation:
+RareOS Independent Validation:
 Recall     = 0.541
 mAP50      = 0.528
 mAP50-95   = 0.304
 
-Best Leaderboard:
-Score      = 95.67
-Recall     = 0.9567
+High-Recall Base Val:
+TP         = 797
+FN         = 48
+Recall     = 0.943195
 
-TP         = 951
-FN         = 43
+Final Combo Val:
+TP         = 824
+FN         = 21
+Recall     = 0.975148
+ScoreLike  = 97.51
+
+Best Leaderboard:
+Score      = 98.09
+Recall     = 0.9809
+Precision  = 0.0004
+mAP@0.5    = 0.4550
+
+TP         = 975
+FP         = 2,402,834
+FN         = 19
+```
+
+当前主要路线：
+
+```text
+RareOS v1
+    ↓
+High-Recall Base
+    ↓
+Remaining FN Diagnostic
+    ↓
+Selective HFlip TTA
+    ↓
+Zonglie Cross-Tile Stitching
+    ↓
+Score 98.09
 ```
 
 项目仍在持续开发中。
@@ -577,8 +1118,10 @@ FN         = 43
 
 ```text
 Remaining FN Analysis
-TTA
-Long-defect Optimization
+Small-object Localization
+Box Fusion / Refinement
+Class-specific Proposal Union
+Selective TTA
 Model Ensemble
-97+ Leaderboard Exploration
+98.5+ / 99 Exploration
 ```
