@@ -14,6 +14,8 @@
 - Horizontal Flip TTA
 - 跨切片长缺陷拼接
 - Cross-View Box Fusion
+- Class-Confusion Correction
+- Baseline / RareOS 跨模型互补性审计
 - Hidden-Test 泛化审计
 - 可复现的单变量消融实验
 
@@ -30,10 +32,13 @@ Baseline
 → Final Selective-TTA Combo
 → Online 98.09
 → Final Combo Remaining-FN Diagnostic
-→ Cross-View Fusion
-→ Targeted Fusion Pruning
-→ Hidden-Test Validation
-→ Negative Result: Val Gain Did Not Transfer
+→ Cross-View Fusion / Targeted Fusion Pruning
+→ Fusion Hidden-Test Negative
+→ Class-Confusion Duplication / Rank-Score Robustness
+→ Class-Confusion Hidden-Test Negative
+→ Old Baseline Test Complementarity Audit
+→ 68-Box Baseline Unique Probe
+→ Baseline Unique Hidden-Test Negative
 ```
 
 当前最好线上成绩仍为：
@@ -58,24 +63,17 @@ FN:        43 → 19
 Δ FN    = -24
 ```
 
-2026-08-11 的 Targeted Cross-View Fusion 在固定 Val 上曾进一步达到：
+2026-08-11 在固定 Val 上继续进行 Final 21 FN 精细优化，但随后进行了三次 Hidden-Test 机制验证，均未新增 TP：
 
-```text
-TP        = 828
-FN        = 17
-Recall    = 0.979882
-ScoreLike = 97.99
-```
+| Probe                         |         Val / 本地现象 | Test 新增框 |      Hidden TP/FN |               Hidden FP |
+| ----------------------------- | ---------------------: | ----------: | ----------------: | ----------------------: |
+| Targeted Cross-View Fusion    |      `824/21 → 828/17` |     +39,676 | `975/19 → 975/19` | `2,402,834 → 2,442,510` |
+| Class-Confusion `mid_50_20`   |      `824/21 → 826/19` |     +22,047 | `975/19 → 975/19` | `2,402,834 → 2,424,881` |
+| Baseline Unique `score>=0.10` | Test-only 独立模型探针 |         +68 | `975/19 → 975/19` | `2,402,834 → 2,402,902` |
 
-但隐藏测试提交后：
+三次实验的 FP 增量都与新增框数量 **精确一致**，即新增框全部成为 FP。当前最好线上成绩因此仍为 `98.09`。
 
-```text
-TP = 975 → 975
-FN = 19  → 19
-FP = 2,402,834 → 2,442,510
-```
-
-新增的 `39,676` 个 fusion boxes 与 FP 增量 **完全一致**，说明该 Val 增益未迁移到隐藏测试集。本项目将该结果作为正式负实验保留，而不是继续在固定 Val 上过拟合 Box Fusion 参数。
+这组结果说明：进入最后 `19` 个 Hidden-Test FN 后，固定 Val 剩余 `21` FN 的具体失败模式已经不能直接代表隐藏测试分布。后续暂停围绕少数 Val FN 继续设计几何融合、类别复制和局部阈值规则，转向真正的跨模型 High-Recall proposal 互补性分析。
 
 ---
 
@@ -1117,7 +1115,361 @@ Hidden Test:
 
 ---
 
-## 16. 当前主要结论
+
+## 16. Class-Confusion 与 Baseline 互补性：后续两次 Hidden-Test 负实验
+
+Cross-View Fusion 在隐藏测试没有迁移后，继续尝试两个与“框坐标融合”不同的机制：
+
+```text
+A. Class-Confusion Correction
+B. Baseline / RareOS Cross-Model Complementarity
+```
+
+这两条路线均先通过 CPU 和已有缓存完成筛选，再用有限的线上提交做机制验证。
+
+### 16.1 Final Combo 21 FN 的类别混淆审计
+
+在：
+
+```text
+scripts/26_class_confusion_dup_sweep.py
+```
+
+中进一步拆分 Final Combo 的 `21` 个 FN：
+
+| Failure Type                       | Count |
+| ---------------------------------- | ----: |
+| class_confusion                    |     6 |
+| localization_failure               |     6 |
+| localization_near_miss             |     3 |
+| fusion_oracle_rescuable            |     3 |
+| no_same_class_candidate            |     2 |
+| localization_or_tile_fragmentation |     1 |
+
+其中 6 个 `class_confusion` 已存在 `IoU >= 0.5` 的错误类别框：
+
+```text
+jieba      <- yanghuatiepi   IoU = 0.7590
+jieba      <- mamianmakeng   IoU = 0.7496
+jiaza      <- jieba          IoU = 0.7199
+jiaza      <- jieba          IoU = 0.6062
+yiwuyaru   <- huashang       IoU = 0.5727
+jiaza      <- yiwuyaru       IoU = 0.5433
+```
+
+说明这一部分失败的主要问题并不是定位，而是类别判定。
+
+同时对整个 474-image Val 做 wrong-class support 审计，确认若干混淆关系并非只存在于单一 FN，例如：
+
+```text
+yanghuatiepi -> jieba
+37 GT / 31 images
+
+jieba -> jiaza
+16 GT / 9 images
+
+huashang -> yiwuyaru
+14 GT / 14 images
+```
+
+因此继续测试“保留原框，同时复制为可能目标类别”的 GT-independent correction。
+
+### 16.2 Class-Confusion Duplication 与裁剪
+
+无条件复制五条 mapping：
+
+```text
+yanghuatiepi -> jieba
+mamianmakeng -> jieba
+jieba        -> jiaza
+huashang     -> yiwuyaru
+yiwuyaru     -> jiaza
+```
+
+固定 Val 一度达到：
+
+```text
+TP        = 829
+FN        = 16
+Recall    = 0.981065
+ScoreLike = 98.11
+
+ΔTP = +5
+ΔFN = -5
+```
+
+但代价是：
+
+```text
++995,332 duplicated boxes
+```
+
+随后通过：
+
+```text
+scripts/27_class_confusion_rank_prune.py
+scripts/28_confusion_rank_support_audit.py
+scripts/29_confusion_min_rescue_rank.py
+scripts/30_confusion_score_gate_sweep.py
+scripts/31_confusion_rank_robustness.py
+```
+
+逐步分析 source-class score rank、Whole-Val rank 分布、最小 rescue rank 和粗粒度 score gate。
+
+最终保留的两条相对稳健机制：
+
+```text
+yanghuatiepi -> jieba
+Top50
+source score >= 1e-4
+
+mamianmakeng -> jieba
+Top20
+source score >= 1e-3
+```
+
+其固定 Val 结果：
+
+```text
+Final Combo:
+TP = 824
+FN = 21
+
+mid_50_20:
+TP = 826
+FN = 19
+
+ΔTP = +2
+ΔFN = -2
+Added = 14,531
+```
+
+并且从：
+
+```text
+20 / 5
+30 / 10
+50 / 20
+100 / 50
+score-only
+```
+
+均保持 `+2 TP`，表明本地增益不依赖单一 Top-K 参数点。
+
+### 16.3 Class-Confusion Hidden-Test 结果
+
+使用：
+
+```text
+scripts/32_confusion_submission.py
+```
+
+复用已有 Test Original / HFlip cache，生成 `mid_50_20` submission。
+
+Test：
+
+```text
+Base detections = 2,403,809
+Added           = 22,047
+Total           = 2,425,856
+```
+
+线上：
+
+```text
+Score  = 98.09
+Recall = 0.9809
+
+TP = 975
+FN = 19
+FP = 2,424,881
+```
+
+与 Final Combo 对比：
+
+```text
+ΔTP = 0
+ΔFN = 0
+
+ΔFP =
+2,424,881 - 2,402,834
+= 22,047
+```
+
+FP 增量与新增框完全一致：
+
+```text
+22,047 duplicated boxes
+→ 0 new TP
+→ 22,047 new FP
+```
+
+因此，即使该 confusion correction 在整个 Val 上表现出一定系统支持，其具体两条 rescue 机制仍未迁移到 Hidden Test。
+
+---
+
+### 16.4 旧 Baseline Test Submission 的跨模型互补性审计
+
+由于暂时没有 GPU，无法立即生成 Baseline High-Recall Val cache，因此先复用历史 Baseline Test submission：
+
+```text
+submissions/baseline1_e73_conf001_nms050.json
+```
+
+其中：
+
+```text
+Baseline Test boxes = 6,463
+minimum score       ≈ 0.01
+```
+
+使用：
+
+```text
+scripts/33_baseline_test_complementarity_audit.py
+```
+
+将每个 Baseline box 与当前 `98.09` Final Combo 做逐框几何比较。
+
+结果：
+
+```text
+same_class_covered      = 5,729  (88.6%)
+class_disagreement      =   178  ( 2.8%)
+independent_geometry    =   556  ( 8.6%)
+
+same-class IoU < 0.5    =   734  (11.4%)
+```
+
+说明旧 Baseline 普通推理中确实存在一小部分 RareOS Final Combo 没有同类覆盖的真实独立 proposal。
+
+按 Baseline 原始 score 筛选：
+
+| Baseline score floor | Unique `<0.5` | Class disagreement | Independent geometry |
+| -------------------: | ------------: | -----------------: | -------------------: |
+|                 0.01 |           734 |                178 |                  556 |
+|                 0.02 |           366 |                 87 |                  279 |
+|                 0.05 |           134 |                 40 |                   94 |
+|                 0.10 |            68 |                 26 |                   42 |
+|                 0.20 |            35 |                 17 |                   18 |
+|                 0.50 |            11 |                  5 |                    6 |
+
+因此选择 `score >= 0.10` 的 `68` 个高置信 unique Baseline boxes，作为高信息密度跨模型探针。
+
+类别分布：
+
+```text
+jieba           13
+zonglie          5
+qilie            5
+jiaza            2
+yiwuyaru        14
+huashang         4
+mamianmakeng    15
+yanghuatiepi     6
+gunyin           4
+```
+
+其中：
+
+```text
+class_disagreement   = 26
+independent_geometry = 42
+```
+
+### 16.5 68-Box Baseline Unique Probe：Hidden-Test 仍无增益
+
+使用：
+
+```text
+scripts/34_baseline_unique_submission.py
+```
+
+生成：
+
+```text
+Base detections = 2,403,809
+Added           = 68
+Total           = 2,403,877
+```
+
+线上结果：
+
+```text
+Score  = 98.09
+Recall = 0.9809
+
+TP = 975
+FN = 19
+FP = 2,402,902
+```
+
+精确差值：
+
+```text
+ΔTP = 0
+ΔFN = 0
+
+ΔFP =
+2,402,902 - 2,402,834
+= 68
+```
+
+因此：
+
+```text
+68 high-confidence Baseline unique boxes
+→ 0 new TP
+→ 68 new FP
+```
+
+这一结果说明：
+
+> 旧 Baseline 常规推理产生的高置信独立框，也没有覆盖当前 Hidden-Test 剩余 19 FN。
+
+但该结论 **不能直接否定 Baseline / RareOS 模型互补性本身**，因为旧 submission 的最低阈值约为 `0.01`，而当前主方案依赖 `conf=1e-5` 的 High-Recall proposal space。
+
+因此下一步不再扩大旧 Baseline submission 的 68 → 134 → 734 个框，而是等待 GPU 后生成真正对齐主方案参数的 Baseline High-Recall Val Original cache，再进行正规的 proposal-level complementarity analysis。
+
+---
+
+### 16.6 三次 Hidden-Test 负实验的联合结论
+
+2026-08-11 的三次机制探针：
+
+```text
+1. Targeted Cross-View Fusion
+   +39,676 boxes
+   +0 TP
+
+2. Class-Confusion Correction
+   +22,047 boxes
+   +0 TP
+
+3. Baseline High-Confidence Unique Probe
+   +68 boxes
+   +0 TP
+```
+
+三次均满足：
+
+```text
+FP 增量 = 新增框数量
+TP 不变
+FN 不变
+```
+
+说明当前 Hidden-Test 剩余 `19` FN 没有被这些机制覆盖。
+
+因此正式冻结以下原则：
+
+> 暂停“观察 Final Combo 剩余 21 个 Val FN → 围绕这些具体 FN 继续设计局部规则 → 直接提交 Hidden Test”的实验路线。
+
+下一阶段应优先获取新的 **High-Recall 模型级 proposal 来源**，并在固定 Val 上先验证跨模型互补性，再决定是否投入 Test inference 与线上提交。
+
+---
+
+## 17. 当前主要结论
 
 ### 训练侧：RareOS v1 有效
 
@@ -1193,173 +1545,186 @@ zonglie FN:
 
 ### Local Val 增益不等于 Hidden-Test 增益
 
-2026-08-11 的 Targeted Fusion：
+2026-08-11 已有两类“Val 正增益 → Hidden Test 零增益”的直接证据：
 
 ```text
-Val:
-+4 TP
+Targeted Cross-View Fusion:
+Val +4 TP
+Hidden Test +0 TP
 
-Hidden Test:
-+0 TP
+Class-Confusion Correction:
+Val +2 TP
+Hidden Test +0 TP
 ```
 
-说明在最后少量 FN 阶段：
+另外，旧 Baseline 模型的 `68` 个 `score>=0.10` 高置信独立 Test proposals 也得到：
+
+```text
+Hidden Test +0 TP
+```
+
+因此在最后少量 FN 阶段：
 
 ```text
 FN diagnostic
-→ 针对固定 Val 设计规则
+→ 针对固定 Val 设计局部规则
 → Val 提升
 ```
 
-并不足以证明规则具有数据分布层面的泛化能力。
+已经不足以证明规则具有数据分布层面的泛化能力。
 
-后续实验需要优先寻找：
+后续优先寻找：
 
 ```text
-模型互补性
-新的独立 proposal 来源
-class confusion 的跨模型证据
+新的 High-Recall 模型级 proposal 来源
+Baseline / RareOS 正规 Val complementarity
+跨模型 class evidence
 ```
 
-而不是继续围绕同一 RareOS + HFlip 候选做越来越窄的几何修正。
+而不是继续围绕 Final 21 Val FN 做几何修正、类别复制或更细阈值搜索。
 
 ---
 
-## 17. 下一阶段计划
+## 18. 下一阶段计划
 
-当前线上：
+当前线上最好结果：
 
 ```text
 Score = 98.09
 TP    = 975
 FN    = 19
+FP    = 2,402,834
 ```
 
-Best Leaderboard 仍由：
+2026-08-11 已经完成三次 Hidden-Test 机制探针：
 
 ```text
-RareOS
-+
-High-Recall
-+
-Selective HFlip
-+
-Zonglie Stitch
+Cross-View Fusion          +0 TP
+Class-Confusion Correction +0 TP
+Baseline Unique 68-box     +0 TP
 ```
 
-产生。
+因此下一阶段不再继续扩大这些已失败机制的框数量。
 
-Targeted Box Fusion 已完成 Hidden-Test 负验证，因此从下一阶段优先列表中降级。
+### Priority 1：生成 Baseline High-Recall Val Original Cache
 
-### Priority 1：Baseline / RareOS 模型互补性
-
-已有：
+Baseline 正式权重仍在：
 
 ```text
-Baseline YOLO26m
-RareOS v1 YOLO26m
+runs/baseline/yolo26m_tiles1280_e80_b6_seed2026/weights/best.pt
 ```
 
-下一步优先验证：
+当前缺少的是与 RareOS 主方案 **完全同推理条件** 的 Baseline proposal cache：
 
 ```text
-Final Combo remaining FN
-        +
-Baseline proposals
+images      = 474 Val originals
+tile_size   = 1280
+stride      = 768
+conf        = 1e-5
+tile_iou    = 0.60
+global_iou  = 0.90
+max_det     = 1000
+```
+
+已经准备：
+
+```text
+scripts/25_build_baseline_val_cache.sh
+```
+
+GPU 恢复后只执行：
+
+```text
+Baseline best.pt
++
+474 Val Original
++
+High-Recall inference
         ↓
-是否存在 RareOS 没有、Baseline 能提供的正确候选
+Baseline Val Original cache
 ```
+
+第一轮 **不跑 Baseline HFlip、不跑 Test、不重新训练**。
+
+这样 GPU 工作量保持最小；cache 生成后立即重新回到 CPU。
+
+### Priority 2：Baseline / RareOS Proposal-Level Complementarity
+
+Baseline High-Recall Val cache 到位后，应重新回答：
+
+```text
+1. Baseline 能直接 rescue 几个 Final Combo FN？
+2. 是否存在 RareOS Original/HFlip 完全没有的 same-class proposal？
+3. Baseline 是否能纠正 RareOS class confusion？
+4. 这些 rescue 是否分布在多个类别 / 多张图，而不是单一 Val 样本？
+5. Final Combo + Baseline candidate union 的完整 Val 净增益是多少？
+```
+
+继续推进的门槛应明显高于此前局部规则：
+
+```text
+优先：
+>= 3 个独立 FN rescue
+
+或：
+数量较少，但明确解决
+no_same_class_candidate / class_confusion
+等不同失败机制
+```
+
+### Priority 3：只有 Val 跨模型互补成立后才生成 Baseline Test Cache
+
+禁止直接：
+
+```text
+旧 Baseline Test submission
+→ 不断降低 score floor
+→ 扩大 68 / 134 / 734 个框
+→ 继续线上试错
+```
+
+68-box 高置信探针已经给出 `+0 TP`。
 
 正确流程：
 
 ```text
-先检查是否已有 Baseline Val cache
+Baseline High-Recall Val cache
         ↓
-若已有：CPU 直接做 complementarity analysis
+CPU complementarity audit
         ↓
-若没有：只在明确值得时重新开 GPU 生成 Baseline Val cache
+确认可解释且跨样本的独立 rescue
         ↓
-确认 Val 有独立 rescue
+才生成 Baseline High-Recall Test cache
         ↓
-才考虑生成 Baseline Test cache
+Model Ensemble submission
 ```
 
-### Priority 2：Class Confusion
+### Priority 4：暂时冻结已失败方向
 
-剩余 FN 中仍有明显：
+暂不继续：
 
 ```text
-class_confusion
+J/H/A/B Cross-View Fusion threshold tuning
+Class-Confusion duplication threshold tuning
+旧 Baseline normal-submission score-floor expansion
+针对 Final 21 Val FN 的逐样本规则
 ```
 
-需要研究：
-
-```text
-RareOS class evidence
-vs
-Baseline class evidence
-```
-
-而不是只融合同一个 RareOS 模型的不同视角。
-
-### Priority 3：No-Same-Class / Independent Proposal Source
-
-若 Final Combo remaining FN 附近：
-
-```text
-RareOS Original
-RareOS HFlip
-```
-
-都缺乏正确同类候选，则继续进行几何 fusion 意义有限。
-
-优先寻找：
-
-```text
-Baseline proposal
-new TTA proposal
-second model
-```
-
-等真正独立候选来源。
-
-### Priority 4：谨慎使用线上提交次数
-
-每天最多 5 次提交。
-
-当前已有：
-
-```text
-98.09
-```
-
-作为安全基线。
-
-后续只有在：
-
-```text
-机制与已失败的 Cross-View Fusion 明显不同
-+
-固定 Val 有可解释增益
-+
-不存在明显 regression
-```
-
-时才进行下一次线上验证。
+这些方向已经有足够 Hidden-Test 负证据。
 
 阶段目标仍为：
 
 ```text
 98.09
-→ 98.5+
-→ 尝试进一步逼近 99
+→ 找到真正跨分布的独立 proposal 机制
+→ 再尝试 98.5+ / 99
 ```
 
-但不为了数字继续过拟合固定 Val。
+重点从“继续把 Val FN 做少”转向“验证新的机制是否真正泛化”。
 
 ---
 
-## 18. 项目结构
+## 19. 项目结构
 
 ```text
 .
@@ -1393,7 +1758,17 @@ second model
 │   ├── 21_fusion_rescue_attribution.py
 │   ├── 22_targeted_fusion_combo.py
 │   ├── 23_targeted_fusion_prune_sweep.py
-│   └── 24_targeted_fusion_submission.py
+│   ├── 24_targeted_fusion_submission.py
+│   ├── 25_build_baseline_val_cache.sh
+│   ├── 26_class_confusion_dup_sweep.py
+│   ├── 27_class_confusion_rank_prune.py
+│   ├── 28_confusion_rank_support_audit.py
+│   ├── 29_confusion_min_rescue_rank.py
+│   ├── 30_confusion_score_gate_sweep.py
+│   ├── 31_confusion_rank_robustness.py
+│   ├── 32_confusion_submission.py
+│   ├── 33_baseline_test_complementarity_audit.py
+│   └── 34_baseline_unique_submission.py
 │
 ├── docs/
 │   └── experiment_log_20260808.md
@@ -1405,35 +1780,45 @@ second model
 
 ---
 
-## 19. 关键脚本
+## 20. 关键脚本
 
-| Script                                     | 功能                                         |
-| ------------------------------------------ | -------------------------------------------- |
-| `00_visualize_voc.py`                      | VOC 标注可视化                               |
-| `01_make_bbox_crops.py`                    | 生成缺陷 bbox 裁剪                           |
-| `02_audit_dataset.py`                      | 数据集审计                                   |
-| `03_voc_to_yolo.py`                        | VOC → YOLO                                   |
-| `04_make_grouped_split.py`                 | 防泄漏 Train / Val 分组                      |
-| `05_make_tile_trial.py`                    | 小规模切片实验                               |
-| `06_make_full_tiles.py`                    | 构建正式 tile 数据集                         |
-| `07_analyze_baseline.py`                   | Baseline 分析                                |
-| `08_make_rare_oversample_dataset.py`       | RareOS 数据构建                              |
-| `09_run_baseline2_gpu.sh`                  | RareOS 训练                                  |
-| `10_predict_test_submission.py`            | 官方 test tiled inference                    |
-| `11_eval_highrecall_val.py`                | 本地 Recall 模拟评测                         |
-| `12_run_highrecall_sweep.sh`               | High-Recall 参数扫描                         |
-| `13_record_experiment_results.sh`          | 自动生成阶段实验记录                         |
-| `14_fn_diagnostic.py`                      | Remaining FN 根因诊断与候选缓存              |
-| `15_cache_hflip_tta.py`                    | Horizontal Flip TTA 候选缓存                 |
-| `16_eval_hflip_tta_cache.py`               | Original + HFlip 离线 Val 评估               |
-| `17_eval_zonglie_cross_tile_stitch_gpu.py` | Zonglie 跨切片拼接参数验证                   |
-| `18_final_combo_from_cache.py`             | Final Combo Val / Test 缓存后处理与提交生成  |
-| `19_final_combo_fn_diagnostic.py`          | Final Combo 剩余 21 FN 精确诊断              |
-| `20_crossview_fusion_sweep.py`             | 内存安全的 Original/HFlip 跨视角融合扫描     |
-| `21_fusion_rescue_attribution.py`          | Fusion rescue / regression 归因              |
-| `22_targeted_fusion_combo.py`              | 类别特异 Targeted Fusion 组合验证            |
-| `23_targeted_fusion_prune_sweep.py`        | Targeted Fusion 几何门限裁剪                 |
-| `24_targeted_fusion_submission.py`         | CPU 流式生成 Targeted Fusion Test submission |
+| Script                                      | 功能                                                         |
+| ------------------------------------------- | ------------------------------------------------------------ |
+| `00_visualize_voc.py`                       | VOC 标注可视化                                               |
+| `01_make_bbox_crops.py`                     | 生成缺陷 bbox 裁剪                                           |
+| `02_audit_dataset.py`                       | 数据集审计                                                   |
+| `03_voc_to_yolo.py`                         | VOC → YOLO                                                   |
+| `04_make_grouped_split.py`                  | 防泄漏 Train / Val 分组                                      |
+| `05_make_tile_trial.py`                     | 小规模切片实验                                               |
+| `06_make_full_tiles.py`                     | 构建正式 tile 数据集                                         |
+| `07_analyze_baseline.py`                    | Baseline 分析                                                |
+| `08_make_rare_oversample_dataset.py`        | RareOS 数据构建                                              |
+| `09_run_baseline2_gpu.sh`                   | RareOS 训练                                                  |
+| `10_predict_test_submission.py`             | 官方 test tiled inference                                    |
+| `11_eval_highrecall_val.py`                 | 本地 Recall 模拟评测                                         |
+| `12_run_highrecall_sweep.sh`                | High-Recall 参数扫描                                         |
+| `13_record_experiment_results.sh`           | 自动生成阶段实验记录                                         |
+| `14_fn_diagnostic.py`                       | Remaining FN 根因诊断与候选缓存                              |
+| `15_cache_hflip_tta.py`                     | Horizontal Flip TTA 候选缓存                                 |
+| `16_eval_hflip_tta_cache.py`                | Original + HFlip 离线 Val 评估                               |
+| `17_eval_zonglie_cross_tile_stitch_gpu.py`  | Zonglie 跨切片拼接参数验证                                   |
+| `18_final_combo_from_cache.py`              | Final Combo Val / Test 缓存后处理与提交生成                  |
+| `19_final_combo_fn_diagnostic.py`           | Final Combo 剩余 21 FN 精确诊断                              |
+| `20_crossview_fusion_sweep.py`              | 内存安全的 Original/HFlip 跨视角融合扫描                     |
+| `21_fusion_rescue_attribution.py`           | Fusion rescue / regression 归因                              |
+| `22_targeted_fusion_combo.py`               | 类别特异 Targeted Fusion 组合验证                            |
+| `23_targeted_fusion_prune_sweep.py`         | Targeted Fusion 几何门限裁剪                                 |
+| `24_targeted_fusion_submission.py`          | CPU 流式生成 Targeted Fusion Test submission                 |
+| `25_build_baseline_val_cache.sh`            | GPU 可用后生成 Baseline High-Recall Val Original cache       |
+| `26_class_confusion_dup_sweep.py`           | Class-confusion duplication 与 Whole-Val wrong-class support |
+| `27_class_confusion_rank_prune.py`          | Source-class Top-K rank 裁剪                                 |
+| `28_confusion_rank_support_audit.py`        | Whole-Val confusion source-rank 分布审计                     |
+| `29_confusion_min_rescue_rank.py`           | 最小 rescue rank 与救援 GT 归因                              |
+| `30_confusion_score_gate_sweep.py`          | Coarse source-score gate 扫描                                |
+| `31_confusion_rank_robustness.py`           | Class-confusion rank 稳定平台验证                            |
+| `32_confusion_submission.py`                | Class-confusion Test submission 生成                         |
+| `33_baseline_test_complementarity_audit.py` | 旧 Baseline Test 与 Final Combo 跨模型几何互补性审计         |
+| `34_baseline_unique_submission.py`          | 高置信 Baseline unique-box Test probe 生成                   |
 
 已有详细实验记录：
 
@@ -1443,7 +1828,7 @@ docs/experiment_log_20260808.md
 
 ---
 
-## 20. 实验原则
+## 21. 实验原则
 
 本项目尽量遵循：
 
@@ -1461,6 +1846,8 @@ docs/experiment_log_20260808.md
 12. **记录负实验，而不是只保留成功实验**
 13. **最终少量 FN 阶段警惕 Validation Overfitting**
 14. **Hidden-Test 结果用于检验机制泛化，而不是只看 Val 最优点**
+15. **同一机制 Hidden-Test 明确失败后，不通过单纯扩大框数继续重复试错**
+16. **最终少量 FN 阶段优先引入新的模型级 proposal，而不是继续拟合具体 Val 样本**
 
 同时明确区分：
 
@@ -1475,7 +1862,7 @@ validation-overfitting problem
 
 ---
 
-## 21. 数据、缓存与权重
+## 22. 数据、缓存与权重
 
 由于数据、缓存和模型文件体积较大，本仓库不保存：
 
@@ -1513,13 +1900,15 @@ records/
 - FN Diagnostic 工具
 - TTA / Cross-Tile 后处理代码
 - Cross-View Fusion 实验代码
+- Class-Confusion / Rank-Score 审计代码
+- Baseline / RareOS 跨模型互补性审计代码
 - 实验记录
 - 正实验与负实验结论
 - 可复现研究流程
 
 ---
 
-## 22. 当前状态
+## 23. 当前状态
 
 ```text
 Model:
@@ -1541,21 +1930,6 @@ FN         = 21
 Recall     = 0.975148
 ScoreLike  = 97.51
 
-Targeted Fusion Val:
-TP         = 828
-FN         = 17
-Recall     = 0.979882
-ScoreLike  = 97.99
-
-Targeted Fusion Hidden Test:
-Score      = 98.09
-TP         = 975
-FN         = 19
-FP         = 2,442,510
-ΔTP        = 0
-ΔFN        = 0
-ΔFP        = +39,676
-
 Best Leaderboard:
 Score      = 98.09
 Recall     = 0.9809
@@ -1567,7 +1941,49 @@ FP         = 2,402,834
 FN         = 19
 ```
 
-当前主路线：
+2026-08-11 Hidden-Test probes：
+
+```text
+1) Targeted Cross-View Fusion
+Val:
+824 / 21 → 828 / 17
+
+Test:
+Added = 39,676
+TP    = 975
+FN    = 19
+FP    = 2,442,510
+ΔTP   = 0
+
+2) Class-Confusion mid_50_20
+Val:
+824 / 21 → 826 / 19
+
+Test:
+Added = 22,047
+TP    = 975
+FN    = 19
+FP    = 2,424,881
+ΔTP   = 0
+
+3) Baseline Unique score>=0.10
+Test:
+Added = 68
+TP    = 975
+FN    = 19
+FP    = 2,402,902
+ΔTP   = 0
+```
+
+三次均满足：
+
+```text
+ΔFP = Added Boxes
+ΔTP = 0
+ΔFN = 0
+```
+
+当前主方案保持：
 
 ```text
 RareOS v1
@@ -1583,34 +1999,37 @@ Zonglie Cross-Tile Stitching
 Score 98.09
 ```
 
-已经完成但不继续扩展的路线：
+已经完成并冻结的负实验路线：
 
 ```text
-Final 21 FN
-    ↓
-Cross-View Targeted Fusion
-    ↓
-Val 824/21 → 828/17
-    ↓
-Hidden Test +0 TP
-    ↓
-Stop further fusion-overfitting
+Final 21 Val FN
+    ├── Targeted Cross-View Fusion
+    │      └── Hidden Test +0 TP
+    │
+    ├── Class-Confusion Correction
+    │      └── Hidden Test +0 TP
+    │
+    └── Old Baseline High-Confidence Unique Probe
+           └── Hidden Test +0 TP
 ```
 
-下一阶段：
+下一阶段唯一优先主线：
 
 ```text
-Baseline / RareOS Complementarity
-        ↓
-Class Confusion Audit
-        ↓
-Independent Proposal Source
-        ↓
-Val-confirmed Model Ensemble
-        ↓
-Hidden-Test Validation
-        ↓
-98.5+ / 99 Exploration
+等待 GPU
+    ↓
+Baseline best.pt
+    ↓
+High-Recall Val Original cache
+(conf=1e-5, stride=768)
+    ↓
+CPU Baseline / RareOS
+proposal-level complementarity audit
+    ↓
+只有 Val 跨模型独立 rescue 成立
+才考虑 Baseline High-Recall Test cache
+    ↓
+Model Ensemble
 ```
 
 项目仍在持续开发中。
