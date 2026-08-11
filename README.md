@@ -13,9 +13,11 @@
 - Remaining FN 根因分析
 - Horizontal Flip TTA
 - 跨切片长缺陷拼接
+- Cross-View Box Fusion
+- Hidden-Test 泛化审计
 - 可复现的单变量消融实验
 
-截至 **2026-08-10**，项目已完成：
+截至 **2026-08-11**，项目已完成：
 
 ```text
 Baseline
@@ -26,10 +28,15 @@ Baseline
 → Horizontal Flip TTA
 → Zonglie Cross-Tile Stitching
 → Final Selective-TTA Combo
-→ Online Leaderboard Validation
+→ Online 98.09
+→ Final Combo Remaining-FN Diagnostic
+→ Cross-View Fusion
+→ Targeted Fusion Pruning
+→ Hidden-Test Validation
+→ Negative Result: Val Gain Did Not Transfer
 ```
 
-当前最好线上成绩：
+当前最好线上成绩仍为：
 
 ```text
 Score  = 98.09
@@ -50,6 +57,25 @@ FN:        43 → 19
 Δ TP    = +24
 Δ FN    = -24
 ```
+
+2026-08-11 的 Targeted Cross-View Fusion 在固定 Val 上曾进一步达到：
+
+```text
+TP        = 828
+FN        = 17
+Recall    = 0.979882
+ScoreLike = 97.99
+```
+
+但隐藏测试提交后：
+
+```text
+TP = 975 → 975
+FN = 19  → 19
+FP = 2,402,834 → 2,442,510
+```
+
+新增的 `39,676` 个 fusion boxes 与 FP 增量 **完全一致**，说明该 Val 增益未迁移到隐藏测试集。本项目将该结果作为正式负实验保留，而不是继续在固定 Val 上过拟合 Box Fusion 参数。
 
 ---
 
@@ -126,15 +152,36 @@ YOLO26m Baseline
         └── Zonglie Cross-Tile Stitching
                          │
                          ▼
-                  Final Combo
+                    Final Combo
                          │
                          ▼
                   Online Score 98.09
+                         │
+                         ▼
+            Final 21 FN Fine-Grained Audit
+                         │
+                         ▼
+               Targeted Box Fusion
+                         │
+             Val: 824/21 → 828/17
+                         │
+                         ▼
+              Hidden-Test Validation
+                         │
+                         ▼
+           Online TP/FN unchanged
+                         │
+                         ▼
+       Stop Fusion Overfitting / Change Mechanism
 ```
 
 实验原则是：
 
 > 先进行单变量短实验和本地验证，确认方向有效后，再投入完整训练或有限的线上提交次数。
+
+进入最终少量 FN 阶段后，进一步增加：
+
+> 固定 Val 上的增益必须经过隐藏测试泛化验证；不能把针对少数 Val FN 调出的规则直接视为可泛化结论。
 
 ---
 
@@ -150,7 +197,7 @@ Train / Val image overlap: 0
 Train / Val group overlap: 0
 ```
 
-验证集在 Baseline、RareOS、High-Recall、FN Diagnostic、TTA 和 Cross-Tile Stitching 实验中保持固定。
+验证集在 Baseline、RareOS、High-Recall、FN Diagnostic、TTA、Cross-Tile Stitching 和 Cross-View Fusion 实验中保持固定。
 
 ---
 
@@ -178,7 +225,7 @@ Val tiles   = 1131
 High-Recall 推理阶段进一步将 stride 收缩至：
 
 ```text
-stride = 768
+stride  = 768
 overlap = 512
 ```
 
@@ -274,14 +321,14 @@ Score ≈ Recall × 100
 
 ### 排行榜成绩演化
 
-| 方案                              |     Score |     Recall |      TP |     FN |            FP |
-| --------------------------------- | --------: | ---------: | ------: | -----: | ------------: |
-| Baseline normal                   |     82.50 |     0.8249 |     820 |    174 |         5,643 |
-| RareOS normal                     |     82.50 |     0.8249 |     820 |    174 |         4,808 |
-| HighRecall v1                     |     88.03 |     0.8803 |     875 |    119 |        18,829 |
-| HighRecall v2                     |     89.54 |     0.8954 |     890 |    104 |        31,858 |
-| HighRecall v3                     |     93.06 |     0.9306 |     925 |     69 |       176,156 |
-| HighRecall + Dense Tiling         |     95.67 |     0.9567 |     951 |     43 |     1,757,850 |
+| 方案                                 |     Score |     Recall |      TP |     FN |            FP |
+| ------------------------------------ | --------: | ---------: | ------: | -----: | ------------: |
+| Baseline normal                      |     82.50 |     0.8249 |     820 |    174 |         5,643 |
+| RareOS normal                        |     82.50 |     0.8249 |     820 |    174 |         4,808 |
+| HighRecall v1                        |     88.03 |     0.8803 |     875 |    119 |        18,829 |
+| HighRecall v2                        |     89.54 |     0.8954 |     890 |    104 |        31,858 |
+| HighRecall v3                        |     93.06 |     0.9306 |     925 |     69 |       176,156 |
+| HighRecall + Dense Tiling            |     95.67 |     0.9567 |     951 |     43 |     1,757,850 |
 | **Selective HFlip + Zonglie Stitch** | **98.09** | **0.9809** | **975** | **19** | **2,402,834** |
 
 从初始 Baseline 到当前最好结果：
@@ -379,7 +426,9 @@ High-Recall 参数实验结果：
 | conf=1e-5 + stride=768                |     795 |     50 |     0.940828 |     94.08 |
 | **conf=1e-5 + stride=768 + gNMS=.90** | **797** | **48** | **0.943195** | **94.32** |
 
-本地排序与线上结果方向一致，因此后续参数筛选继续优先通过固定 Val 的 Recall 模拟完成。
+本地排序在 High-Recall 阶段多次与线上结果方向一致，因此参数筛选优先通过固定 Val 的 Recall 模拟完成。
+
+但 2026-08-11 的 Box Fusion 负实验表明：**进入最后少量 FN 阶段后，本地小幅增益不再能自动视为隐藏测试可泛化增益。**
 
 ---
 
@@ -403,17 +452,17 @@ scripts/14_fn_diagnostic.py
 
 ### 48 个 FN 的失败类型
 
-| Failure Type                          | Count |
-| ------------------------------------- | ----: |
-| localization_or_tile_fragmentation    |    22 |
-| localization_failure                  |    14 |
-| class_confusion                       |    12 |
+| Failure Type                       | Count |
+| ---------------------------------- | ----: |
+| localization_or_tile_fragmentation |    22 |
+| localization_failure               |    14 |
+| class_confusion                    |    12 |
 
 即：
 
 ```text
 Localization / Tile Fragmentation = 36 / 48 = 75%
-Class Confusion                   = 12 / 48 = 25%
+Class Confusion                    = 12 / 48 = 25%
 ```
 
 没有观察到主要由以下因素导致的 FN：
@@ -428,17 +477,17 @@ no_same_class_candidate
 
 ### FN 类别分布
 
-| Class         | TP  | FN | Recall |
-| ------------- | --: | -: | -----: |
-| jieba         | 170 |  7 | 0.9605 |
-| zonglie       |  49 | 16 | 0.7538 |
-| qilie         |   4 |  3 | 0.5714 |
-| jiaza         |  32 |  5 | 0.8649 |
-| yiwuyaru      |  89 |  3 | 0.9674 |
-| huashang      |  19 |  5 | 0.7917 |
-| mamianmakeng  | 332 |  1 | 0.9970 |
-| yanghuatiepi  |  65 |  7 | 0.9028 |
-| gunyin        |  37 |  1 | 0.9737 |
+| Class        |   TP |   FN | Recall |
+| ------------ | ---: | ---: | -----: |
+| jieba        |  170 |    7 | 0.9605 |
+| zonglie      |   49 |   16 | 0.7538 |
+| qilie        |    4 |    3 | 0.5714 |
+| jiaza        |   32 |    5 | 0.8649 |
+| yiwuyaru     |   89 |    3 | 0.9674 |
+| huashang     |   19 |    5 | 0.7917 |
+| mamianmakeng |  332 |    1 | 0.9970 |
+| yanghuatiepi |   65 |    7 | 0.9028 |
+| gunyin       |   37 |    1 | 0.9737 |
 
 其中 `zonglie` 成为最大的单一 FN 来源。
 
@@ -469,34 +518,34 @@ Unified Class-aware Global NMS
 
 ```text
 Original:
-TP       = 797
-FN       = 48
-Recall   = 0.943195
-ScoreLike= 94.32
+TP        = 797
+FN        = 48
+Recall    = 0.943195
+ScoreLike = 94.32
 
 Original + HFlip:
-TP       = 809
-FN       = 36
-Recall   = 0.957396
-ScoreLike= 95.74
+TP        = 809
+FN        = 36
+Recall    = 0.957396
+ScoreLike = 95.74
 ```
 
 即：
 
 ```text
-Rescued FN = 12
+Rescued FN  = 12
 Regressed TP = 0
 ```
 
 HFlip 救回类别：
 
-| Class         | Rescued FN |
-| ------------- | ---------: |
-| jieba         |          3 |
-| qilie         |          2 |
-| jiaza         |          1 |
-| yiwuyaru      |          2 |
-| yanghuatiepi  |          4 |
+| Class        | Rescued FN |
+| ------------ | ---------: |
+| jieba        |          3 |
+| qilie        |          2 |
+| jiaza        |          1 |
+| yiwuyaru     |          2 |
+| yanghuatiepi |          4 |
 
 而：
 
@@ -538,8 +587,8 @@ localization_or_tile_fragmentation
 其典型 GT 几何形态：
 
 ```text
-width  ≈ 53 ~ 129 px
-height ≈ 1937 ~ 2999 px
+width      ≈ 53 ~ 129 px
+height     ≈ 1937 ~ 2999 px
 elongation ≈ 23 ~ 53
 ```
 
@@ -683,10 +732,10 @@ yanghuatiepi
 ### Zonglie Stitch
 
 ```text
-min_aspect       = 5
-x_tol            = 64
-max_y_gap        = 64
-min_merged_height= 1300
+min_aspect        = 5
+x_tol             = 64
+max_y_gap         = 64
+min_merged_height = 1300
 ```
 
 ### Final Combo Val
@@ -712,8 +761,8 @@ FN:  48 → 21
 其中：
 
 ```text
-HFlip rescue           = +12 TP
-Zonglie stitching      = +15 TP
+HFlip rescue      = +12 TP
+Zonglie stitching = +15 TP
 ```
 
 两类增益基本互补。
@@ -789,11 +838,288 @@ Class-Specific Cross-Tile Post-processing
 
 ---
 
-## 15. 当前主要结论
+## 15. Targeted Cross-View Fusion：本地正结果与线上负结果
 
-### 训练侧
+2026-08-11，在无 GPU 的 CPU-only 模式下继续复用现有 Original / HFlip cache，对 Final Combo 剩余 21 FN 做更精细的诊断。
 
-RareOS v1 有效：
+新增：
+
+```text
+scripts/19_final_combo_fn_diagnostic.py
+```
+
+首先精确复现 Final Combo：
+
+```text
+TP        = 824
+FP        = 1,631,208
+FN        = 21
+Recall    = 0.975148
+Stitched  = 4323
+```
+
+### 15.1 Final Combo 剩余 21 FN
+
+类别分布：
+
+```text
+huashang       5
+jieba          4
+jiaza          4
+yanghuatiepi   3
+zonglie        1
+qilie          1
+yiwuyaru       1
+mamianmakeng   1
+gunyin         1
+```
+
+进一步对 Original / HFlip 候选进行 oracle 几何诊断，发现 8 个 FN 理论上存在简单双视角框融合后达到 `IoU >= 0.5` 的可能。
+
+但 oracle 只用于判断机制潜力，不作为 Test 构框规则。
+
+### 15.2 GT-independent Cross-View Fusion
+
+新增：
+
+```text
+scripts/20_crossview_fusion_sweep.py
+scripts/21_fusion_rescue_attribution.py
+```
+
+在不使用 GT 选择测试框的前提下，通过：
+
+```text
+Original proposal
++
+HFlip proposal
++
+same-class geometric pairing
++
+envelope / avg50 / score-weighted fusion
+```
+
+确认 4 个可独立救回的 Val FN：
+
+```text
+jieba      +1
+huashang   +1
+jiaza      +2
+```
+
+4 个 rescue 互不重叠。
+
+### 15.3 Targeted Fusion
+
+新增：
+
+```text
+scripts/22_targeted_fusion_combo.py
+```
+
+针对不同类别 / 几何机制分别设计：
+
+```text
+J: jieba
+   横向分离、尺寸接近
+   → envelope
+
+H: huashang
+   y 方向高度对齐、x 方向错位
+   → envelope
+
+A: jiaza
+   x 中心接近、高度差异明显
+   → avg50
+
+B: jiaza
+   横向分离、尺寸接近
+   → envelope
+```
+
+Targeted Fusion 固定 Val：
+
+```text
+Baseline:
+TP = 824
+FN = 21
+
+Targeted:
+TP = 828
+FN = 17
+
+Recall    = 0.979882
+ScoreLike = 97.99
+
+Δ TP = +4
+Δ FN = -4
+Regression = 0
+```
+
+### 15.4 Fusion Pruning
+
+初始 targeted 规则虽然得到 +4 TP，但会增加：
+
+```text
+1,381,340 fusion boxes
+```
+
+因此新增：
+
+```text
+scripts/23_targeted_fusion_prune_sweep.py
+```
+
+对四类几何机制增加上下界约束。
+
+最终：
+
+```text
+pruned_v1:
+TP = 828
+FN = 17
+added fusion boxes = 29,590
+
+pruned_v2_Hscore:
+TP = 828
+FN = 17
+added fusion boxes = 13,918
+```
+
+即在保持全部 +4 TP 的同时，将新增框从约 138 万压缩到数万级。
+
+各原子规则单独依然均可保持 `+1 TP`，说明 Val 上的四类 rescue 在一定阈值邻域内是稳定的，而不是单一参数点偶然命中。
+
+### 15.5 Hidden-Test Submission
+
+新增：
+
+```text
+scripts/24_targeted_fusion_submission.py
+```
+
+使用已有 Test cache：
+
+```text
+Test images = 669
+
+Original cache:
+2,247,792 candidates
+
+HFlip cache:
+2,252,373 candidates
+```
+
+不重新运行模型 forward，CPU 直接生成提交。
+
+`pruned_v1` Test：
+
+```text
+Base detections   = 2,403,809
+Fusion detections = 39,676
+Total detections  = 2,443,485
+Zero scores       = 0
+```
+
+Fusion by rule：
+
+```text
+J1 = 33,556
+H1 =  4,435
+A1 =  1,296
+B1 =    389
+```
+
+Test fusion 数量与 Val / Test 数据规模整体处于合理比例，因此正式提交 `pruned_v1`。
+
+### 15.6 线上结果：没有新增 TP
+
+原 Final Combo：
+
+```text
+Score  = 98.09
+Recall = 0.9809
+
+TP = 975
+FP = 2,402,834
+FN = 19
+```
+
+Targeted Fusion `pruned_v1`：
+
+```text
+Score      = 98.09
+Recall     = 0.9809
+Precision  = 0.0004
+F1         = 0.0008
+mAP@0.5    = 0.4550
+
+TP = 975
+FP = 2,442,510
+FN = 19
+```
+
+精确差值：
+
+```text
+Δ TP = 0
+Δ FN = 0
+
+Δ FP =
+2,442,510 - 2,402,834
+= 39,676
+```
+
+这与 Test 中新增的：
+
+```text
+Fusion detections = 39,676
+```
+
+**完全一致。**
+
+因此可以明确判断：
+
+```text
+39,676 个新增 fusion boxes
+→ 0 个新增 TP
+→ 39,676 个全部成为 FP
+```
+
+即：
+
+```text
+Val:
+824 / 21
+→ 828 / 17
+(+4 TP)
+
+Hidden Test:
+975 / 19
+→ 975 / 19
+(+0 TP)
+```
+
+### 15.7 负实验结论
+
+该实验说明：
+
+1. Original / HFlip Box Fusion 在固定 Val 的最后少量 FN 上存在明显局部收益。
+2. 经过 pruning 后，Val 上的 +4 TP 并非依赖海量框数量。
+3. 但这四类局部几何 rescue **没有迁移到隐藏测试**。
+4. 在最终少量 FN 阶段，仅依据固定 Val 的少数失败样本继续收紧规则存在明显过拟合风险。
+5. 后续不再围绕 J/H/A/B 继续进行更窄的 Box Fusion 参数搜索。
+6. `pruned_v2_Hscore` 是更严格的同机制子集，因此不值得消耗线上次数重复验证该机制。
+
+这是一项正式保留的负实验结果：
+
+> 本地验证可以用于筛选方向，但当剩余 FN 数量已经很少时，单个 Val FN 的几何修正规则必须警惕 validation overfitting；隐藏测试验证仍然不可替代。
+
+---
+
+## 16. 当前主要结论
+
+### 训练侧：RareOS v1 有效
 
 ```text
 Validation Recall
@@ -802,7 +1128,7 @@ Validation Recall
 
 说明定向长尾重采样可以提高召回能力。
 
-### High-Recall 推理侧
+### High-Recall 推理有效，但存在边际收益递减
 
 此前最有效的基础策略：
 
@@ -815,8 +1141,8 @@ Validation Recall
 但在：
 
 ```text
-conf = 1e-5
-stride = 768
+conf       = 1e-5
+stride     = 768
 global_iou = 0.90
 ```
 
@@ -865,51 +1191,163 @@ zonglie FN:
 
 说明对于超长目标，单纯提高 overlap 并不能完全替代结构化跨切片拼接。
 
+### Local Val 增益不等于 Hidden-Test 增益
+
+2026-08-11 的 Targeted Fusion：
+
+```text
+Val:
++4 TP
+
+Hidden Test:
++0 TP
+```
+
+说明在最后少量 FN 阶段：
+
+```text
+FN diagnostic
+→ 针对固定 Val 设计规则
+→ Val 提升
+```
+
+并不足以证明规则具有数据分布层面的泛化能力。
+
+后续实验需要优先寻找：
+
+```text
+模型互补性
+新的独立 proposal 来源
+class confusion 的跨模型证据
+```
+
+而不是继续围绕同一 RareOS + HFlip 候选做越来越窄的几何修正。
+
 ---
 
-## 16. 下一阶段计划
+## 17. 下一阶段计划
 
 当前线上：
 
 ```text
 Score = 98.09
+TP    = 975
 FN    = 19
 ```
 
-已经从“继续扩大整体召回”进入“针对最后少量 FN 做精细优化”的阶段。
-
-固定 Val Final Combo 下剩余 21 个 FN 主要集中于：
+Best Leaderboard 仍由：
 
 ```text
-huashang       5
-jieba          4
-jiaza          4
-yanghuatiepi   3
-zonglie        1
-qilie          1
-yiwuyaru       1
-mamianmakeng   1
-gunyin         1
+RareOS
++
+High-Recall
++
+Selective HFlip
++
+Zonglie Stitch
 ```
 
-下一阶段优先研究：
+产生。
+
+Targeted Box Fusion 已完成 Hidden-Test 负验证，因此从下一阶段优先列表中降级。
+
+### Priority 1：Baseline / RareOS 模型互补性
+
+已有：
 
 ```text
-Remaining 21 FN
-      │
-      ├── Small-object Localization
-      │     └── huashang
-      │
-      ├── Box Fusion / Box Refinement
-      │
-      ├── Class-specific Proposal Union
-      │
-      ├── Selective Additional TTA
-      │
-      └── Model Ensemble
+Baseline YOLO26m
+RareOS v1 YOLO26m
 ```
 
-阶段目标：
+下一步优先验证：
+
+```text
+Final Combo remaining FN
+        +
+Baseline proposals
+        ↓
+是否存在 RareOS 没有、Baseline 能提供的正确候选
+```
+
+正确流程：
+
+```text
+先检查是否已有 Baseline Val cache
+        ↓
+若已有：CPU 直接做 complementarity analysis
+        ↓
+若没有：只在明确值得时重新开 GPU 生成 Baseline Val cache
+        ↓
+确认 Val 有独立 rescue
+        ↓
+才考虑生成 Baseline Test cache
+```
+
+### Priority 2：Class Confusion
+
+剩余 FN 中仍有明显：
+
+```text
+class_confusion
+```
+
+需要研究：
+
+```text
+RareOS class evidence
+vs
+Baseline class evidence
+```
+
+而不是只融合同一个 RareOS 模型的不同视角。
+
+### Priority 3：No-Same-Class / Independent Proposal Source
+
+若 Final Combo remaining FN 附近：
+
+```text
+RareOS Original
+RareOS HFlip
+```
+
+都缺乏正确同类候选，则继续进行几何 fusion 意义有限。
+
+优先寻找：
+
+```text
+Baseline proposal
+new TTA proposal
+second model
+```
+
+等真正独立候选来源。
+
+### Priority 4：谨慎使用线上提交次数
+
+每天最多 5 次提交。
+
+当前已有：
+
+```text
+98.09
+```
+
+作为安全基线。
+
+后续只有在：
+
+```text
+机制与已失败的 Cross-View Fusion 明显不同
++
+固定 Val 有可解释增益
++
+不存在明显 regression
+```
+
+时才进行下一次线上验证。
+
+阶段目标仍为：
 
 ```text
 98.09
@@ -917,11 +1355,11 @@ Remaining 21 FN
 → 尝试进一步逼近 99
 ```
 
-线上提交次数有限，因此新方案仍应优先在固定 Val 和缓存候选上验证。
+但不为了数字继续过拟合固定 Val。
 
 ---
 
-## 17. 项目结构
+## 18. 项目结构
 
 ```text
 .
@@ -949,7 +1387,13 @@ Remaining 21 FN
 │   ├── 15_cache_hflip_tta.py
 │   ├── 16_eval_hflip_tta_cache.py
 │   ├── 17_eval_zonglie_cross_tile_stitch_gpu.py
-│   └── 18_final_combo_from_cache.py
+│   ├── 18_final_combo_from_cache.py
+│   ├── 19_final_combo_fn_diagnostic.py
+│   ├── 20_crossview_fusion_sweep.py
+│   ├── 21_fusion_rescue_attribution.py
+│   ├── 22_targeted_fusion_combo.py
+│   ├── 23_targeted_fusion_prune_sweep.py
+│   └── 24_targeted_fusion_submission.py
 │
 ├── docs/
 │   └── experiment_log_20260808.md
@@ -961,29 +1405,35 @@ Remaining 21 FN
 
 ---
 
-## 18. 关键脚本
+## 19. 关键脚本
 
-| Script                                          | 功能                                      |
-| ----------------------------------------------- | ----------------------------------------- |
-| `00_visualize_voc.py`                           | VOC 标注可视化                            |
-| `01_make_bbox_crops.py`                         | 生成缺陷 bbox 裁剪                        |
-| `02_audit_dataset.py`                           | 数据集审计                                |
-| `03_voc_to_yolo.py`                             | VOC → YOLO                                |
-| `04_make_grouped_split.py`                      | 防泄漏 Train / Val 分组                   |
-| `05_make_tile_trial.py`                         | 小规模切片实验                            |
-| `06_make_full_tiles.py`                         | 构建正式 tile 数据集                      |
-| `07_analyze_baseline.py`                        | Baseline 分析                             |
-| `08_make_rare_oversample_dataset.py`            | RareOS 数据构建                           |
-| `09_run_baseline2_gpu.sh`                       | RareOS 训练                               |
-| `10_predict_test_submission.py`                 | 官方 test tiled inference                 |
-| `11_eval_highrecall_val.py`                     | 本地 Recall 模拟评测                      |
-| `12_run_highrecall_sweep.sh`                    | High-Recall 参数扫描                      |
-| `13_record_experiment_results.sh`               | 自动生成阶段实验记录                      |
-| `14_fn_diagnostic.py`                           | Remaining FN 根因诊断与候选缓存           |
-| `15_cache_hflip_tta.py`                         | Horizontal Flip TTA 候选缓存              |
-| `16_eval_hflip_tta_cache.py`                    | Original + HFlip 离线 Val 评估            |
-| `17_eval_zonglie_cross_tile_stitch_gpu.py`      | Zonglie 跨切片拼接参数验证                |
-| `18_final_combo_from_cache.py`                  | Final Combo Val / Test 缓存后处理与提交生成 |
+| Script                                     | 功能                                         |
+| ------------------------------------------ | -------------------------------------------- |
+| `00_visualize_voc.py`                      | VOC 标注可视化                               |
+| `01_make_bbox_crops.py`                    | 生成缺陷 bbox 裁剪                           |
+| `02_audit_dataset.py`                      | 数据集审计                                   |
+| `03_voc_to_yolo.py`                        | VOC → YOLO                                   |
+| `04_make_grouped_split.py`                 | 防泄漏 Train / Val 分组                      |
+| `05_make_tile_trial.py`                    | 小规模切片实验                               |
+| `06_make_full_tiles.py`                    | 构建正式 tile 数据集                         |
+| `07_analyze_baseline.py`                   | Baseline 分析                                |
+| `08_make_rare_oversample_dataset.py`       | RareOS 数据构建                              |
+| `09_run_baseline2_gpu.sh`                  | RareOS 训练                                  |
+| `10_predict_test_submission.py`            | 官方 test tiled inference                    |
+| `11_eval_highrecall_val.py`                | 本地 Recall 模拟评测                         |
+| `12_run_highrecall_sweep.sh`               | High-Recall 参数扫描                         |
+| `13_record_experiment_results.sh`          | 自动生成阶段实验记录                         |
+| `14_fn_diagnostic.py`                      | Remaining FN 根因诊断与候选缓存              |
+| `15_cache_hflip_tta.py`                    | Horizontal Flip TTA 候选缓存                 |
+| `16_eval_hflip_tta_cache.py`               | Original + HFlip 离线 Val 评估               |
+| `17_eval_zonglie_cross_tile_stitch_gpu.py` | Zonglie 跨切片拼接参数验证                   |
+| `18_final_combo_from_cache.py`             | Final Combo Val / Test 缓存后处理与提交生成  |
+| `19_final_combo_fn_diagnostic.py`          | Final Combo 剩余 21 FN 精确诊断              |
+| `20_crossview_fusion_sweep.py`             | 内存安全的 Original/HFlip 跨视角融合扫描     |
+| `21_fusion_rescue_attribution.py`          | Fusion rescue / regression 归因              |
+| `22_targeted_fusion_combo.py`              | 类别特异 Targeted Fusion 组合验证            |
+| `23_targeted_fusion_prune_sweep.py`        | Targeted Fusion 几何门限裁剪                 |
+| `24_targeted_fusion_submission.py`         | CPU 流式生成 Targeted Fusion Test submission |
 
 已有详细实验记录：
 
@@ -993,7 +1443,7 @@ docs/experiment_log_20260808.md
 
 ---
 
-## 19. 实验原则
+## 20. 实验原则
 
 本项目尽量遵循：
 
@@ -1008,6 +1458,9 @@ docs/experiment_log_20260808.md
 9. **先分析 FN 根因，再选择下一项实验**
 10. **优先复用 inference cache，减少重复 GPU 推理**
 11. **针对不同类别采用不同后处理策略**
+12. **记录负实验，而不是只保留成功实验**
+13. **最终少量 FN 阶段警惕 Validation Overfitting**
+14. **Hidden-Test 结果用于检验机制泛化，而不是只看 Val 最优点**
 
 同时明确区分：
 
@@ -1017,11 +1470,12 @@ tiling problem
 training problem
 inference problem
 post-processing problem
+validation-overfitting problem
 ```
 
 ---
 
-## 20. 数据、缓存与权重
+## 21. 数据、缓存与权重
 
 由于数据、缓存和模型文件体积较大，本仓库不保存：
 
@@ -1058,12 +1512,14 @@ records/
 - Recall 评测工具
 - FN Diagnostic 工具
 - TTA / Cross-Tile 后处理代码
+- Cross-View Fusion 实验代码
 - 实验记录
+- 正实验与负实验结论
 - 可复现研究流程
 
 ---
 
-## 21. 当前状态
+## 22. 当前状态
 
 ```text
 Model:
@@ -1085,6 +1541,21 @@ FN         = 21
 Recall     = 0.975148
 ScoreLike  = 97.51
 
+Targeted Fusion Val:
+TP         = 828
+FN         = 17
+Recall     = 0.979882
+ScoreLike  = 97.99
+
+Targeted Fusion Hidden Test:
+Score      = 98.09
+TP         = 975
+FN         = 19
+FP         = 2,442,510
+ΔTP        = 0
+ΔFN        = 0
+ΔFP        = +39,676
+
 Best Leaderboard:
 Score      = 98.09
 Recall     = 0.9809
@@ -1096,7 +1567,7 @@ FP         = 2,402,834
 FN         = 19
 ```
 
-当前主要路线：
+当前主路线：
 
 ```text
 RareOS v1
@@ -1112,16 +1583,34 @@ Zonglie Cross-Tile Stitching
 Score 98.09
 ```
 
-项目仍在持续开发中。
-
-下一阶段重点：
+已经完成但不继续扩展的路线：
 
 ```text
-Remaining FN Analysis
-Small-object Localization
-Box Fusion / Refinement
-Class-specific Proposal Union
-Selective TTA
-Model Ensemble
+Final 21 FN
+    ↓
+Cross-View Targeted Fusion
+    ↓
+Val 824/21 → 828/17
+    ↓
+Hidden Test +0 TP
+    ↓
+Stop further fusion-overfitting
+```
+
+下一阶段：
+
+```text
+Baseline / RareOS Complementarity
+        ↓
+Class Confusion Audit
+        ↓
+Independent Proposal Source
+        ↓
+Val-confirmed Model Ensemble
+        ↓
+Hidden-Test Validation
+        ↓
 98.5+ / 99 Exploration
 ```
+
+项目仍在持续开发中。
