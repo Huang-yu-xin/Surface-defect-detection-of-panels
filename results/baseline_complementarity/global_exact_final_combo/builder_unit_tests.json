@@ -1,0 +1,20 @@
+{
+  "cross_tile_synthetic": "PASS",
+  "active_hflip_reference": "PASS",
+  "cache_coordinate_sanity": "PASS",
+  "builder_has_no_annotation_or_evaluation_argument": "PASS",
+  "cache_checks": {
+    "original": {
+      "nonzero_origin_rows_checked": 1187,
+      "max_coordinate_residual": 0.0
+    },
+    "hflip": {
+      "nonzero_origin_rows_checked": 1927,
+      "max_coordinate_residual": 0.0
+    },
+    "baseline": {
+      "nonzero_origin_rows_checked": 1408,
+      "max_coordinate_residual": 0.0
+    }
+  }
+}

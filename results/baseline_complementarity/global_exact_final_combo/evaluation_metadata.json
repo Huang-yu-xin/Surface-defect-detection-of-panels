@@ -1,0 +1,29 @@
+{
+  "assignment_schema": {
+    "columns": [
+      "image",
+      "label",
+      "group_id",
+      "group_rule",
+      "split",
+      "is_empty",
+      "classes",
+      "box_count"
+    ],
+    "image_column": "image",
+    "group_column": "group_id"
+  },
+  "match_iou": 0.5,
+  "global_nms_iou": 0.9,
+  "hflip_classes": [
+    0,
+    2,
+    3,
+    4,
+    7
+  ],
+  "submission_rounding": {
+    "bbox": "floor x1/y1, ceil x2/y2, clipped",
+    "score_decimals": 6
+  }
+}

@@ -1,0 +1,211 @@
+{
+  "decision": "GO",
+  "recommended_hidden_candidate": "u1e3_g060",
+  "selected_audit_config": "u1e3_g060",
+  "criteria": {
+    "u3e4_g060": [
+      {
+        "criterion": "Exact Final Combo net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "roundtrip net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 images",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 grouped-split groups",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 2 classes",
+        "pass": true
+      },
+      {
+        "criterion": "rescues span >= 2 failure clusters",
+        "pass": true
+      },
+      {
+        "criterion": "net gain without largest group > 0",
+        "pass": true
+      },
+      {
+        "criterion": "adjacent frozen config within 1 TP net",
+        "pass": true
+      }
+    ],
+    "u3e4_g080": [
+      {
+        "criterion": "Exact Final Combo net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "roundtrip net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 images",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 grouped-split groups",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 2 classes",
+        "pass": true
+      },
+      {
+        "criterion": "rescues span >= 2 failure clusters",
+        "pass": true
+      },
+      {
+        "criterion": "net gain without largest group > 0",
+        "pass": true
+      },
+      {
+        "criterion": "adjacent frozen config within 1 TP net",
+        "pass": true
+      }
+    ],
+    "u1e3_g060": [
+      {
+        "criterion": "Exact Final Combo net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "roundtrip net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 images",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 grouped-split groups",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 2 classes",
+        "pass": true
+      },
+      {
+        "criterion": "rescues span >= 2 failure clusters",
+        "pass": true
+      },
+      {
+        "criterion": "net gain without largest group > 0",
+        "pass": true
+      },
+      {
+        "criterion": "adjacent frozen config within 1 TP net",
+        "pass": true
+      }
+    ],
+    "u1e3_g080": [
+      {
+        "criterion": "Exact Final Combo net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "roundtrip net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 images",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 grouped-split groups",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 2 classes",
+        "pass": true
+      },
+      {
+        "criterion": "rescues span >= 2 failure clusters",
+        "pass": true
+      },
+      {
+        "criterion": "net gain without largest group > 0",
+        "pass": true
+      },
+      {
+        "criterion": "adjacent frozen config within 1 TP net",
+        "pass": true
+      }
+    ],
+    "uinf_g060": [
+      {
+        "criterion": "Exact Final Combo net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "roundtrip net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 images",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 grouped-split groups",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 2 classes",
+        "pass": true
+      },
+      {
+        "criterion": "rescues span >= 2 failure clusters",
+        "pass": true
+      },
+      {
+        "criterion": "net gain without largest group > 0",
+        "pass": true
+      },
+      {
+        "criterion": "adjacent frozen config within 1 TP net",
+        "pass": true
+      }
+    ],
+    "uinf_g080": [
+      {
+        "criterion": "Exact Final Combo net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "roundtrip net gain >= +3",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 images",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 3 grouped-split groups",
+        "pass": true
+      },
+      {
+        "criterion": "rescued >= 2 classes",
+        "pass": true
+      },
+      {
+        "criterion": "rescues span >= 2 failure clusters",
+        "pass": true
+      },
+      {
+        "criterion": "net gain without largest group > 0",
+        "pass": true
+      },
+      {
+        "criterion": "adjacent frozen config within 1 TP net",
+        "pass": true
+      }
+    ]
+  }
+}

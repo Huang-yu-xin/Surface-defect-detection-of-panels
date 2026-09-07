@@ -1,0 +1,61 @@
+{
+  "float_tp": 824,
+  "float_fp": 1631201,
+  "float_fn": 21,
+  "roundtrip_tp": 824,
+  "roundtrip_fp": 1631201,
+  "roundtrip_fn": 21,
+  "config": "baseline_reproduction",
+  "final_detection_count": 1632025,
+  "stitched_count": 4323,
+  "runtime_seconds": 214.09167075157166,
+  "peak_rss_mb": 86.98046875,
+  "per_class": {
+    "jieba": {
+      "tp": 173,
+      "fp": 381881,
+      "fn": 4
+    },
+    "zonglie": {
+      "tp": 64,
+      "fp": 404000,
+      "fn": 1
+    },
+    "qilie": {
+      "tp": 6,
+      "fp": 55457,
+      "fn": 1
+    },
+    "jiaza": {
+      "tp": 33,
+      "fp": 87819,
+      "fn": 4
+    },
+    "yiwuyaru": {
+      "tp": 91,
+      "fp": 235838,
+      "fn": 1
+    },
+    "huashang": {
+      "tp": 19,
+      "fp": 144762,
+      "fn": 5
+    },
+    "mamianmakeng": {
+      "tp": 332,
+      "fp": 98335,
+      "fn": 1
+    },
+    "yanghuatiepi": {
+      "tp": 69,
+      "fp": 133825,
+      "fn": 3
+    },
+    "gunyin": {
+      "tp": 37,
+      "fp": 89284,
+      "fn": 1
+    }
+  },
+  "roundtrip_changes": 0
+}
